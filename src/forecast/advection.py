@@ -22,7 +22,7 @@ def calculate_advection_adjustment(
                 temp_850_values.append(point.temperature_850hpa_c)
     direction_inputs = surface_dirs + wind_850_dirs
     if not direction_inputs:
-        return ForecastAdjustment(name="advection", value_c=0.0, summary="wind direction unavailable", inputs={})
+        return ForecastAdjustment(name="advection", value_c=0.0, summary="rüzgâr yönü verisi yok", inputs={})
 
     avg_dir = _circular_mean(direction_inputs)
     avg_850_temp = mean(temp_850_values) if temp_850_values else None
@@ -54,4 +54,3 @@ def _circular_mean(values: list[float]) -> float:
     cos_sum = sum(math.cos(math.radians(value)) for value in values)
     angle = math.degrees(math.atan2(sin_sum, cos_sum))
     return angle + 360 if angle < 0 else angle
-

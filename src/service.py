@@ -95,10 +95,8 @@ class ForecastService:
             taf=ctx.taf,
             model_bundle=ctx.model_bundle,
             market=ctx.market,
+            report_label=report_label,
         )
-        llm_summary = await self.llm.summarize(report)
-        if llm_summary:
-            report = f"{report}\n\nLLM yorumu:\n{llm_summary}"
         return report
 
     async def render_now(self) -> str:

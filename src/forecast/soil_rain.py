@@ -24,7 +24,7 @@ def calculate_rain_soil_adjustment(
             midday_precip.append(sum(midday))
     taf_risk = bool(taf and taf.rain_or_storm_risk)
     if not totals and not taf_risk:
-        return ForecastAdjustment(name="rain_soil", value_c=0.0, summary="precipitation unavailable/low", inputs={})
+        return ForecastAdjustment(name="rain_soil", value_c=0.0, summary="yağış verisi yok veya düşük", inputs={})
 
     avg_total = mean(totals) if totals else 0.0
     avg_midday = mean(midday_precip) if midday_precip else 0.0
@@ -44,4 +44,3 @@ def calculate_rain_soil_adjustment(
         summary=f"model yağış ort. {avg_total:.1f} mm, öğlen {avg_midday:.1f} mm, TAF risk {'var' if taf_risk else 'yok'}",
         inputs={"avg_total_precip_mm": avg_total, "avg_midday_precip_mm": avg_midday, "precip_spread_mm": spread, "taf_risk": taf_risk},
     )
-
