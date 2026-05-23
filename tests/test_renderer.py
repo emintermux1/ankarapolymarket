@@ -27,4 +27,5 @@ def test_renderer_marks_missing_market_without_fake_numbers() -> None:
     assert "ilgili market bulunamadı" in text
     assert "unavailable" in text
     assert "Yatırım tavsiyesi değildir" in text
-
+    assert "• Polymarket link" in text
+    assert "* Polymarket link" not in text

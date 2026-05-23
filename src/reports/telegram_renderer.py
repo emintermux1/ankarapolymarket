@@ -33,7 +33,10 @@ class TelegramReportRenderer:
         market_lines = self._market_lines(analysis, market)
         model_lines = self._model_lines(model_bundle, analysis)
         dynamic_lines = self._dynamic_lines(analysis)
-        bullets = "\n".join(f"* {bullet}" for bullet in analysis.rationale_bullets) or "Veri eksik; gerekçe üretilemedi."
+        bullets = (
+            "\n".join(_bullet(bullet) for bullet in analysis.rationale_bullets)
+            or "Veri eksik; gerekçe üretilemedi."
+        )
         return "\n".join(
             [
                 "ANKARA ESENBOĞA GÜNLÜK MAKSİMUM SICAKLIK TAHMİNİ",
@@ -87,8 +90,9 @@ class TelegramReportRenderer:
         periods = []
         for period in taf.periods[:5]:
             periods.append(
-                f"* {period.time_from.astimezone(self.tz):%d %H:%M}-{period.time_to.astimezone(self.tz):%d %H:%M}: "
-                f"{period.change or 'BASE'} {period.weather or ''} rüzgâr {period.wind_direction_deg or 'VRB'}°/{period.wind_speed_kt or 0:.0f} kt"
+                f"• {period.time_from.astimezone(self.tz):%d %H:%M}-{period.time_to.astimezone(self.tz):%d %H:%M}: "
+                f"{period.change or 'BASE'} {period.weather or ''} rüzgâr "
+                f"{period.wind_direction_deg or 'VRB'}°/{period.wind_speed_kt or 0:.0f} kt"
             )
         return "\n".join(
             [
@@ -119,7 +123,12 @@ class TelegramReportRenderer:
         if analysis:
             lines.append(f"Edge: {analysis.edge_summary}")
         for outcome in market.outcomes:
-            lines.append(f"* {outcome.bracket}: {_fmt_pct(outcome.implied_probability)} spread {_fmt_num(outcome.spread)}")
+            lines.append(
+                _bullet(
+                    f"{outcome.bracket}: {_fmt_pct(outcome.implied_probability)} "
+                    f"spread {_fmt_num(outcome.spread)}"
+                )
+            )
         lines.append("Not: Yatırım tavsiyesi değildir.")
         return "\n".join(lines)
 
@@ -130,7 +139,7 @@ class TelegramReportRenderer:
         for item in health:
             suffix = f" ({item.message})" if item.message else ""
             latency = f", {item.latency_ms:.0f} ms" if item.latency_ms is not None else ""
-            lines.append(f"* {item.source}: {item.state.value}{latency}{suffix}")
+            lines.append(_bullet(f"{item.source}: {item.state.value}{latency}{suffix}"))
         return "\n".join(lines)
 
     def backtest_report(self, rows: list[dict]) -> str:
@@ -139,7 +148,10 @@ class TelegramReportRenderer:
         lines = ["BACKTEST ÖZETİ"]
         for row in rows[:10]:
             lines.append(
-                f"* {row['model']} {row['window_days']}g: MAE {_fmt_num(row['mae'])}, bias {_fmt_num(row['bias'])}, kalibrasyon {_fmt_num(row['calibration_score'])}"
+                _bullet(
+                    f"{row['model']} {row['window_days']}g: MAE {_fmt_num(row['mae'])}, "
+                    f"bias {_fmt_num(row['bias'])}, kalibrasyon {_fmt_num(row['calibration_score'])}"
+                )
             )
         return "\n".join(lines)
 
@@ -159,31 +171,39 @@ class TelegramReportRenderer:
     def _metar_lines(self, metar: METARNormalized | None) -> list[str]:
         if metar is None:
             return [
-                "* Son METAR: unavailable",
-                "* Gözlem zamanı: unavailable",
-                "* Sıcaklık: unavailable",
-                "* Çiğ noktası: unavailable",
-                "* Nem: unavailable",
-                "* Rüzgâr: unavailable",
-                "* Basınç: unavailable",
-                "* Bulut: unavailable",
-                "* Görüş: unavailable",
+                _bullet("Son METAR: unavailable"),
+                _bullet("Gözlem zamanı: unavailable"),
+                _bullet("Sıcaklık: unavailable"),
+                _bullet("Çiğ noktası: unavailable"),
+                _bullet("Nem: unavailable"),
+                _bullet("Rüzgâr: unavailable"),
+                _bullet("Basınç: unavailable"),
+                _bullet("Bulut: unavailable"),
+                _bullet("Görüş: unavailable"),
             ]
         return [
-            f"* Son METAR: {metar.raw_text}",
-            f"* Gözlem zamanı: {metar.observation_time:%Y-%m-%d %H:%M UTC}",
-            f"* Sıcaklık: {metar.temperature_c:.1f}°C",
-            f"* Çiğ noktası: {metar.dew_point_c:.1f}°C",
-            f"* Nem: %{metar.relative_humidity if metar.relative_humidity is not None else 'unavailable'}",
-            f"* Rüzgâr: {metar.wind_direction_deg if metar.wind_direction_deg is not None else 'VRB'}° / {metar.wind_speed_kt:.0f} KT",
-            f"* Basınç: {_fmt_num(metar.pressure_hpa)} hPa",
-            f"* Bulut: {_format_clouds(metar.cloud_layers)}",
-            f"* Görüş: {metar.visibility_m if metar.visibility_m is not None else 'unavailable'}m",
+            _bullet(f"Son METAR: {metar.raw_text}"),
+            _bullet(f"Gözlem zamanı: {metar.observation_time:%Y-%m-%d %H:%M UTC}"),
+            _bullet(f"Sıcaklık: {metar.temperature_c:.1f}°C"),
+            _bullet(f"Çiğ noktası: {metar.dew_point_c:.1f}°C"),
+            _bullet(f"Nem: %{metar.relative_humidity if metar.relative_humidity is not None else 'unavailable'}"),
+            _bullet(
+                f"Rüzgâr: {metar.wind_direction_deg if metar.wind_direction_deg is not None else 'VRB'}° / "
+                f"{metar.wind_speed_kt:.0f} KT"
+            ),
+            _bullet(f"Basınç: {_fmt_num(metar.pressure_hpa)} hPa"),
+            _bullet(f"Bulut: {_format_clouds(metar.cloud_layers)}"),
+            _bullet(f"Görüş: {metar.visibility_m if metar.visibility_m is not None else 'unavailable'}m"),
         ]
 
     def _model_lines(self, bundle: ModelBundle | None, analysis: ForecastAnalysis | None = None) -> list[str]:
         if bundle is None:
-            return ["* ECMWF: unavailable", "* GFS: unavailable", "* ICON: unavailable", "* Model spread: unavailable"]
+            return [
+                _bullet("ECMWF: unavailable"),
+                _bullet("GFS: unavailable"),
+                _bullet("ICON: unavailable"),
+                _bullet("Model spread: unavailable"),
+            ]
         lines = []
         name_map = {
             "icon_eu": "ICON-EU",
@@ -197,38 +217,40 @@ class TelegramReportRenderer:
             weight = ""
             if analysis and forecast.model in analysis.model_weights:
                 weight = f" / ağırlık %{analysis.model_weights[forecast.model] * 100:.0f}"
-            lines.append(f"* {label}: {_fmt_c(forecast.tmax_c) if forecast.available else 'unavailable'}{weight}")
+            lines.append(
+                _bullet(f"{label}: {_fmt_c(forecast.tmax_c) if forecast.available else 'unavailable'}{weight}")
+            )
         values = [forecast.tmax_c for forecast in bundle.available_forecasts if forecast.tmax_c is not None]
         if values:
-            lines.append(f"* Model aralığı: {min(values):.1f}°C - {max(values):.1f}°C")
+            lines.append(_bullet(f"Model aralığı: {min(values):.1f}°C - {max(values):.1f}°C"))
         else:
-            lines.append("* Model aralığı: unavailable")
+            lines.append(_bullet("Model aralığı: unavailable"))
         if analysis and analysis.ensemble_sigma_c is not None:
-            lines.append(f"* Ensemble sigma: {analysis.ensemble_sigma_c:.1f}°C")
+            lines.append(_bullet(f"Ensemble sigma: {analysis.ensemble_sigma_c:.1f}°C"))
         if analysis and analysis.probability_sigma_c is not None:
-            lines.append(f"* Probability sigma: {analysis.probability_sigma_c:.1f}°C")
+            lines.append(_bullet(f"Probability sigma: {analysis.probability_sigma_c:.1f}°C"))
         return lines
 
     def _dynamic_lines(self, analysis: ForecastAnalysis) -> list[str]:
         lookup = {item.name: item for item in analysis.adjustments}
         return [
-            f"* Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}",
-            f"* Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}",
-            f"* Yağış riski: {_adj(lookup.get('rain_soil'))}",
-            f"* LTAC mikroklima: {_adj(lookup.get('ltac_microclimate'))}",
+            _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
+            _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
+            _bullet(f"Yağış riski: {_adj(lookup.get('rain_soil'))}"),
+            _bullet(f"LTAC mikroklima: {_adj(lookup.get('ltac_microclimate'))}"),
         ]
 
     def _market_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
         if market is None or not market.valid_for_target:
             return [
-                "* Polymarket link: ilgili market bulunamadı",
-                "* Outcome fiyatları: unavailable",
-                "* Hacim: unavailable",
-                "* Spread: unavailable",
-                "* Likidite: unavailable",
-                "* Bot fair probability: unavailable",
-                "* Edge: Edge yok",
-                "* Not: Yatırım tavsiyesi değildir.",
+                _bullet("Polymarket link: ilgili market bulunamadı"),
+                _bullet("Outcome fiyatları: unavailable"),
+                _bullet("Hacim: unavailable"),
+                _bullet("Spread: unavailable"),
+                _bullet("Likidite: unavailable"),
+                _bullet("Bot fair probability: unavailable"),
+                _bullet("Edge: Edge yok"),
+                _bullet("Not: Yatırım tavsiyesi değildir."),
             ]
         prices = ", ".join(
             f"{outcome.bracket} {_fmt_pct(outcome.implied_probability)}"
@@ -236,17 +258,24 @@ class TelegramReportRenderer:
             if outcome.implied_probability is not None
         ) or "unavailable"
         spreads = [outcome.spread for outcome in market.outcomes if outcome.spread is not None]
-        fair = ", ".join(f"{key}: %{value * 100:.0f}" for key, value in analysis.fair_probabilities.items()) or "unavailable"
+        fair = (
+            ", ".join(f"{key}: %{value * 100:.0f}" for key, value in analysis.fair_probabilities.items())
+            or "unavailable"
+        )
         return [
-            f"* Polymarket link: {market.link}",
-            f"* Outcome fiyatları: {prices}",
-            f"* Hacim: ${_fmt_num(market.volume)}",
-            f"* Spread: {_fmt_num(max(spreads) if spreads else None)}",
-            f"* Likidite: ${_fmt_num(market.liquidity)}",
-            f"* Bot fair probability: {fair}",
-            f"* Edge: {analysis.edge_summary}",
-            "* Not: Yatırım tavsiyesi değildir.",
+            _bullet(f"Polymarket link: {market.link}"),
+            _bullet(f"Outcome fiyatları: {prices}"),
+            _bullet(f"Hacim: ${_fmt_num(market.volume)}"),
+            _bullet(f"Spread: {_fmt_num(max(spreads) if spreads else None)}"),
+            _bullet(f"Likidite: ${_fmt_num(market.liquidity)}"),
+            _bullet(f"Bot fair probability: {fair}"),
+            _bullet(f"Edge: {analysis.edge_summary}"),
+            _bullet("Not: Yatırım tavsiyesi değildir."),
         ]
+
+
+def _bullet(text: str) -> str:
+    return f"• {text}"
 
 
 def _fmt_c(value: float | None) -> str:

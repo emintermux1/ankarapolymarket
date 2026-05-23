@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
-from telegram import Update
+from telegram import LinkPreviewOptions, Update
 from telegram.ext import ContextTypes
 
 from src.service import ForecastService
+
+_DISABLE_LINK_PREVIEWS = LinkPreviewOptions(is_disabled=True)
 
 
 def service_from_context(context: ContextTypes.DEFAULT_TYPE) -> ForecastService:
@@ -12,7 +14,11 @@ def service_from_context(context: ContextTypes.DEFAULT_TYPE) -> ForecastService:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _reply(update, "LTAC Ankara Esenboğa bot aktif. Komutlar: /today /now /metar /taf /models /market /edge /backtest /sources /chart /result")
+    await _reply(
+        update,
+        "LTAC Ankara Esenboğa bot aktif. Komutlar: "
+        "/today /now /metar /taf /models /market /edge /backtest /sources /chart /result",
+    )
 
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -105,14 +111,18 @@ def _is_admin(update: Update, service: ForecastService) -> bool:
 
 async def _reply(update: Update, text: str) -> None:
     if update.effective_message:
-        await update.effective_message.reply_text(text)
+        await update.effective_message.reply_text(text, link_preview_options=_DISABLE_LINK_PREVIEWS)
 
 
 async def _reply_long(update: Update, text: str) -> None:
     if update.effective_message is None:
         return
     for chunk in _chunks(text, 3900):
-        await update.effective_message.reply_text(chunk, parse_mode=None)
+        await update.effective_message.reply_text(
+            chunk,
+            parse_mode=None,
+            link_preview_options=_DISABLE_LINK_PREVIEWS,
+        )
 
 
 def _chunks(text: str, max_len: int) -> list[str]:
