@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from src.config import Settings
 from src.data_sources.aviationweather import AviationWeatherAdapter
+from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
@@ -16,12 +17,16 @@ from src.data_sources.schemas import (
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
+    ModelForecast,
     SourceHealth,
     TAFNormalized,
 )
+from src.data_sources.tomorrow import TomorrowIOAdapter
+from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.wunderground import WundergroundScraper
 from src.db.repository import Repository, manual_actual_result
 from src.forecast.engine import LTACForecastEngine
+from src.llm.openai_client import OpenAIReportClient
 from src.reports.charts import ChartRenderer
 from src.reports.telegram_renderer import TelegramReportRenderer
 
@@ -40,13 +45,17 @@ class ForecastService:
         self.settings = settings
         self.repository = repository
         self.aviation = AviationWeatherAdapter(settings)
+        self.checkwx = CheckWXAdapter(settings)
         self.openmeteo = OpenMeteoAdapter(settings)
+        self.visualcrossing = VisualCrossingAdapter(settings)
+        self.tomorrow = TomorrowIOAdapter(settings)
         self.polymarket = PolymarketAviationReader(settings)
         self.iem = IEMASOSAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
         self.engine = LTACForecastEngine(settings)
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
+        self.llm = OpenAIReportClient(settings)
 
     def default_target_date(self) -> date:
         return datetime.now(ZoneInfo(self.settings.report_timezone)).date()
@@ -80,13 +89,17 @@ class ForecastService:
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
-        return self.renderer.daily_report(
+        report = self.renderer.daily_report(
             analysis=ctx.analysis,
             metar=ctx.metar,
             taf=ctx.taf,
             model_bundle=ctx.model_bundle,
             market=ctx.market,
         )
+        llm_summary = await self.llm.summarize(report)
+        if llm_summary:
+            report = f"{report}\n\nLLM yorumu:\n{llm_summary}"
+        return report
 
     async def render_now(self) -> str:
         metar = await self._safe_metar()
@@ -128,7 +141,12 @@ class ForecastService:
 
     async def render_result(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
-        result = await self.wunderground.get_daily_result(target)
+        if self.settings.visualcrossing_api_key:
+            result = await self.visualcrossing.get_daily_result(target)
+            if result.tmax_c is None:
+                result = await self.wunderground.get_daily_result(target)
+        else:
+            result = await self.wunderground.get_daily_result(target)
         self.repository.save_actual_result(result)
         return self.renderer.result_report(result)
 
@@ -156,7 +174,10 @@ class ForecastService:
     async def check_sources(self) -> list[SourceHealth]:
         health = await asyncio.gather(
             self.aviation.health(),
+            self.checkwx.health(),
             self.openmeteo.health(),
+            self.visualcrossing.health(),
+            self.tomorrow.health(),
             self.polymarket.health(),
             self.iem.health(),
             self.wunderground.health(),
@@ -169,17 +190,52 @@ class ForecastService:
         try:
             return await self.aviation.get_metar()
         except Exception:
-            return None
+            try:
+                return await self.checkwx.get_metar()
+            except Exception:
+                return None
 
     async def _safe_taf(self) -> TAFNormalized | None:
         try:
             return await self.aviation.get_taf()
         except Exception:
-            return None
+            try:
+                return await self.checkwx.get_taf()
+            except Exception:
+                return None
 
     async def _safe_models(self, target_date: date) -> ModelBundle | None:
+        bundle, visual, tomorrow = await asyncio.gather(
+            self._safe_openmeteo_models(target_date),
+            self._safe_visualcrossing_model(target_date),
+            self._safe_tomorrow_model(target_date),
+        )
+        extras = [forecast for forecast in (visual, tomorrow) if forecast is not None]
+        if bundle is None and extras:
+            bundle = ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target_date, source="Mixed")
+        if bundle is not None:
+            bundle.forecasts.extend(extras)
+        return bundle
+
+    async def _safe_openmeteo_models(self, target_date: date) -> ModelBundle | None:
         try:
             return await self.openmeteo.get_bundle_with_ensemble(target_date)
+        except Exception:
+            return None
+
+    async def _safe_visualcrossing_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.visualcrossing_api_key:
+            return None
+        try:
+            return await self.visualcrossing.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_tomorrow_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.tomorrow_api_key:
+            return None
+        try:
+            return await self.tomorrow.get_model_forecast(target_date)
         except Exception:
             return None
 
@@ -188,4 +244,3 @@ class ForecastService:
             return await self.polymarket.get_market(target_date)
         except Exception:
             return None
-
