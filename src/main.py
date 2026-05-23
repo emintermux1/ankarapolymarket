@@ -34,15 +34,9 @@ def main() -> None:
         return
 
     application = build_application(settings, service)
-    scheduler = application.bot_data["scheduler"]
-    scheduler.start()
     logging.getLogger(__name__).info("LTAC bot polling started")
-    try:
-        application.run_polling(close_loop=False)
-    finally:
-        scheduler.shutdown(wait=False)
+    application.run_polling(close_loop=False)
 
 
 if __name__ == "__main__":
     main()
-

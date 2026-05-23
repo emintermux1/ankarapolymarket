@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -19,7 +20,10 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
     telegram_channel_id: str | None = Field(default=None, alias="TELEGRAM_CHANNEL_ID")
-    telegram_admin_ids: list[int] = Field(default_factory=list, alias="TELEGRAM_ADMIN_IDS")
+    telegram_admin_ids: Annotated[list[int], NoDecode] = Field(
+        default_factory=list,
+        alias="TELEGRAM_ADMIN_IDS",
+    )
 
     database_url: str = Field(default="sqlite:///./data/ltac_weather_bot.db", alias="DATABASE_URL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -34,15 +38,15 @@ class Settings(BaseSettings):
         default="highest-temperature-in-ankara-on-may-24-2026",
         alias="POLYMARKET_EVENT_SLUG",
     )
-    polymarket_target_location_terms: list[str] = Field(
+    polymarket_target_location_terms: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["ankara", "esenboğa", "esenboga", "ltac"],
         alias="POLYMARKET_TARGET_LOCATION_TERMS",
     )
-    openmeteo_models: list[str] = Field(
+    openmeteo_models: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["ecmwf_ifs025", "gfs_seamless", "icon_seamless"],
         alias="OPENMETEO_MODELS",
     )
-    openmeteo_ensemble_models: list[str] = Field(
+    openmeteo_ensemble_models: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["ecmwf_ifs025", "gfs_seamless", "icon_seamless"],
         alias="OPENMETEO_ENSEMBLE_MODELS",
     )
@@ -79,6 +83,9 @@ class Settings(BaseSettings):
         if value is None or isinstance(value, list):
             return value
         if isinstance(value, str):
+            value = value.strip()
+            if value.startswith("["):
+                return json.loads(value)
             items = [part.strip() for part in value.split(",") if part.strip()]
             return items
         return value
