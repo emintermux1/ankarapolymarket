@@ -43,13 +43,14 @@ class Settings(BaseSettings):
         alias="POLYMARKET_TARGET_LOCATION_TERMS",
     )
     openmeteo_models: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["ecmwf_ifs025", "gfs_seamless", "icon_seamless"],
+        default_factory=lambda: ["icon_eu", "ecmwf_ifs025", "icon_global", "gfs_seamless"],
         alias="OPENMETEO_MODELS",
     )
     openmeteo_ensemble_models: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["ecmwf_ifs025", "gfs_seamless", "icon_seamless"],
+        default_factory=lambda: ["icon_eu", "ecmwf_ifs025", "icon_global", "gfs_seamless"],
         alias="OPENMETEO_ENSEMBLE_MODELS",
     )
+    openmeteo_bias_correction: bool = Field(default=True, alias="OPENMETEO_BIAS_CORRECTION")
 
     http_timeout_seconds: float = Field(default=20.0, alias="HTTP_TIMEOUT_SECONDS")
     http_retries: int = Field(default=2, alias="HTTP_RETRIES")

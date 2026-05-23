@@ -217,6 +217,8 @@ class ForecastAnalysis(BaseModel):
     main_range_low_c: float | None
     main_range_high_c: float | None
     model_spread_c: float | None
+    ensemble_sigma_c: float | None = None
+    probability_sigma_c: float | None = None
     confidence_score: int
     confidence_factors: dict[str, Any]
     verdict: str
@@ -244,4 +246,3 @@ def relative_humidity_from_temp_dewpoint(temp_c: float, dewpoint_c: float) -> in
     numerator = exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
     denominator = exp((17.625 * temp_c) / (243.04 + temp_c))
     return int(round(max(0.0, min(100.0, 100.0 * numerator / denominator))))
-

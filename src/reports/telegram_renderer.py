@@ -31,7 +31,7 @@ class TelegramReportRenderer:
     ) -> str:
         report_time = analysis.generated_at.astimezone(self.tz)
         market_lines = self._market_lines(analysis, market)
-        model_lines = self._model_lines(model_bundle)
+        model_lines = self._model_lines(model_bundle, analysis)
         dynamic_lines = self._dynamic_lines(analysis)
         bullets = "\n".join(f"* {bullet}" for bullet in analysis.rationale_bullets) or "Veri eksik; gerekçe üretilemedi."
         return "\n".join(
@@ -181,19 +181,32 @@ class TelegramReportRenderer:
             f"* Görüş: {metar.visibility_m if metar.visibility_m is not None else 'unavailable'}m",
         ]
 
-    def _model_lines(self, bundle: ModelBundle | None) -> list[str]:
+    def _model_lines(self, bundle: ModelBundle | None, analysis: ForecastAnalysis | None = None) -> list[str]:
         if bundle is None:
             return ["* ECMWF: unavailable", "* GFS: unavailable", "* ICON: unavailable", "* Model spread: unavailable"]
         lines = []
-        name_map = {"ecmwf": "ECMWF", "gfs": "GFS", "icon": "ICON"}
+        name_map = {
+            "icon_eu": "ICON-EU",
+            "icon_global": "ICON-Global",
+            "ecmwf": "ECMWF",
+            "gfs": "GFS",
+            "icon": "ICON",
+        }
         for forecast in bundle.forecasts:
             label = next((display for key, display in name_map.items() if key in forecast.model.lower()), forecast.model)
-            lines.append(f"* {label}: {_fmt_c(forecast.tmax_c) if forecast.available else 'unavailable'}")
+            weight = ""
+            if analysis and forecast.model in analysis.model_weights:
+                weight = f" / ağırlık %{analysis.model_weights[forecast.model] * 100:.0f}"
+            lines.append(f"* {label}: {_fmt_c(forecast.tmax_c) if forecast.available else 'unavailable'}{weight}")
         values = [forecast.tmax_c for forecast in bundle.available_forecasts if forecast.tmax_c is not None]
         if values:
             lines.append(f"* Model aralığı: {min(values):.1f}°C - {max(values):.1f}°C")
         else:
             lines.append("* Model aralığı: unavailable")
+        if analysis and analysis.ensemble_sigma_c is not None:
+            lines.append(f"* Ensemble sigma: {analysis.ensemble_sigma_c:.1f}°C")
+        if analysis and analysis.probability_sigma_c is not None:
+            lines.append(f"* Probability sigma: {analysis.probability_sigma_c:.1f}°C")
         return lines
 
     def _dynamic_lines(self, analysis: ForecastAnalysis) -> list[str]:
@@ -260,4 +273,3 @@ def _adj(adjustment: object | None) -> str:
     if adjustment is None:
         return "unavailable"
     return f"{adjustment.summary} ({adjustment.value_c:+.1f}°C)"
-

@@ -16,7 +16,14 @@ from src.forecast.advection import calculate_advection_adjustment
 from src.forecast.bias_correction import calculate_bias_offsets
 from src.forecast.cloud_radiation import calculate_cloud_radiation_adjustment
 from src.forecast.confidence import calculate_confidence
-from src.forecast.ensemble import calculate_model_weights, model_spread, weighted_model_tmax
+from src.forecast.ensemble import (
+    calculate_model_weights,
+    ensemble_sigma,
+    historical_mae_sigma,
+    model_spread,
+    probability_sigma,
+    weighted_model_tmax,
+)
 from src.forecast.live_adjustment import calculate_live_observation_adjustment
 from src.forecast.soil_rain import calculate_rain_soil_adjustment
 
@@ -43,6 +50,17 @@ class LTACForecastEngine:
             bias_offsets.setdefault(forecast.model, 0.0)
         base_tmax = weighted_model_tmax(forecasts, weights, bias_offsets)
         spread = model_spread(forecasts)
+        ens_sigma = ensemble_sigma(model_bundle.ensembles)
+        hist_sigma = historical_mae_sigma(historical_weights)
+        uncertainty_spread = max(
+            [value for value in (spread, ens_sigma) if value is not None],
+            default=None,
+        )
+        prob_sigma = probability_sigma(
+            deterministic_spread_c=spread,
+            ensemble_sigma_c=ens_sigma,
+            historical_sigma_c=hist_sigma,
+        )
         adjustments = self._adjustments(target_date, metar, taf, forecasts)
         final = None
         if base_tmax is not None:
@@ -53,7 +71,7 @@ class LTACForecastEngine:
         cloud_uncertainty = _extract_adjustment_input(adjustments, "cloud_radiation", "cloud_uncertainty_pct")
         precip_spread = _extract_adjustment_input(adjustments, "rain_soil", "precip_spread_mm")
         confidence, factors = calculate_confidence(
-            model_spread_c=spread,
+            model_spread_c=uncertainty_spread,
             available_models=len(available),
             expected_models=len(forecasts),
             metar=metar,
@@ -64,7 +82,11 @@ class LTACForecastEngine:
             has_history=bool(historical_weights),
             market=market,
         )
-        fair_probabilities = _fair_probabilities(final, spread, market)
+        factors["deterministic_model_spread_c"] = round(spread, 2) if spread is not None else None
+        factors["ensemble_sigma_c"] = round(ens_sigma, 2) if ens_sigma is not None else None
+        factors["historical_mae_sigma_c"] = round(hist_sigma, 2) if hist_sigma is not None else None
+        factors["probability_sigma_c"] = round(prob_sigma, 2)
+        fair_probabilities = _fair_probabilities(final, prob_sigma, market)
         edge_summary = _edge_summary(fair_probabilities, market)
         return ForecastAnalysis(
             target_date=target_date,
@@ -75,16 +97,18 @@ class LTACForecastEngine:
             main_range_low_c=round(final - 0.5, 1) if final is not None else None,
             main_range_high_c=round(final + 0.5, 1) if final is not None else None,
             model_spread_c=round(spread, 2) if spread is not None else None,
+            ensemble_sigma_c=round(ens_sigma, 2) if ens_sigma is not None else None,
+            probability_sigma_c=round(prob_sigma, 2),
             confidence_score=confidence,
             confidence_factors=factors,
-            verdict=_verdict(final, confidence, spread),
+            verdict=_verdict(final, confidence, prob_sigma),
             adjustments=adjustments,
             model_weights={key: round(value, 3) for key, value in weights.items()},
             model_bias_offsets={key: round(value, 2) for key, value in bias_offsets.items()},
             fair_probabilities=fair_probabilities,
             edge_summary=edge_summary,
-            rationale_bullets=_rationale(metar, taf, forecasts, adjustments, spread),
-            risks=_risks(adjustments, spread, taf),
+            rationale_bullets=_rationale(metar, taf, forecasts, adjustments, spread, ens_sigma, prob_sigma),
+            risks=_risks(adjustments, prob_sigma, taf),
         )
 
     def _adjustments(
@@ -108,7 +132,7 @@ class LTACForecastEngine:
             ForecastAdjustment(
                 name="uncertainty",
                 value_c=0.0,
-                summary="model spread güven skoruna işlendi; gizli sıcaklık kaydırması yok",
+                summary="model/ensemble belirsizliği güven skoruna işlendi; gizli sıcaklık kaydırması yok",
                 inputs={},
             ),
         ]
@@ -132,14 +156,14 @@ def _verdict(final: float | None, confidence: int, spread: float | None) -> str:
     if confidence < 45:
         return f"{final:.1f}°C merkezli, düşük güvenli tahmin"
     if spread is not None and spread > 1.8:
-        return f"{final:.1f}°C merkezli, model ayrışması yüksek"
+        return f"{final:.1f}°C merkezli, belirsizlik yüksek"
     return f"{final:.1f}°C merkezli kontrollü tahmin"
 
 
-def _fair_probabilities(final: float | None, spread: float | None, market: MarketSnapshot | None) -> dict[str, float]:
+def _fair_probabilities(final: float | None, sigma: float | None, market: MarketSnapshot | None) -> dict[str, float]:
     if final is None or market is None:
         return {}
-    sigma = max(0.65, (spread or 1.0), 0.9)
+    sigma = max(0.65, sigma or 0.9)
     probabilities: dict[str, float] = {}
     for outcome in market.outcomes:
         lower, upper = _bracket_bounds(outcome.bracket)
@@ -195,6 +219,8 @@ def _rationale(
     forecasts: list,
     adjustments: list[ForecastAdjustment],
     spread: float | None,
+    ens_sigma: float | None,
+    prob_sigma: float,
 ) -> list[str]:
     bullets: list[str] = []
     available = [forecast for forecast in forecasts if forecast.available and forecast.tmax_c is not None]
@@ -206,6 +232,8 @@ def _rationale(
         bullets.append(f"Şu model(ler) hedef gün için veri vermedi: {', '.join(unavailable)}.")
     if spread is not None:
         bullets.append(f"Model spread {spread:.1f}°C; ayrışma güven skoruna doğrudan yansıtıldı.")
+    if ens_sigma is not None and len(bullets) < 6:
+        bullets.append(f"Ensemble dağılımından türetilen sigma {ens_sigma:.1f}°C; olasılık hesabında final sigma {prob_sigma:.1f}°C.")
     if metar is not None:
         bullets.append(f"Son METAR {metar.temperature_c:.0f}/{metar.dew_point_c:.0f}°C ve rüzgâr {metar.wind_direction_deg or 'VRB'}°/{metar.wind_speed_kt:.0f} kt.")
     for name in ("live_observation", "cloud_radiation", "rain_soil", "advection"):
@@ -235,7 +263,7 @@ def _risks(
         downward = f"Yağış/zemin soğutması belirgin: {rain.summary}"
     critical = "Wunderground final tam °C rounding/source davranışı"
     if spread is not None and spread > 1.5:
-        critical = "Model ayrışması ve Wunderground rounding sınırı"
+        critical = "Model/ensemble belirsizliği ve Wunderground rounding sınırı"
     if taf and taf.rain_or_storm_risk:
         critical = "Konvektif yağış zamanlaması + Wunderground rounding"
     return {
