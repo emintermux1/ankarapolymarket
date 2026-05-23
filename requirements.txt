@@ -1,0 +1,12 @@
+apscheduler>=3.10.4
+httpx>=0.27.2
+matplotlib>=3.9.2
+numpy>=2.1.1
+pandas>=2.2.2
+psycopg[binary]>=3.2.1
+pydantic>=2.8.2
+pydantic-settings>=2.4.0
+python-dotenv>=1.0.1
+python-telegram-bot>=21.4
+SQLAlchemy>=2.0.34
+
