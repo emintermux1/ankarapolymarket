@@ -1,1 +1,75 @@
-# ankarapolymarket
+# Ankara LTAC Weather Bot
+
+Ankara Esenboğa (LTAC) günlük maksimum sıcaklık tahmini, model karşılaştırması ve Polymarket fiyatlama analizi için Telegram botu.
+
+## MVP kapsamı
+
+- AviationWeather METAR/TAF adapteri
+- Open-Meteo deterministic + ensemble adapteri
+- IEM ASOS LTAC geçmiş arşivi adapteri
+- Polymarket Gamma/CLOB/Data read-only reader
+- SQLAlchemy database modeli: observations, tafs, model_snapshots, forecast_runs, market_snapshots, daily_predictions, actual_results, source_status, backtest_scores, model_weights, analog_days
+- Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, cloud/radiation, rain/soil, confidence
+- Telegram komutları: `/today`, `/now`, `/metar`, `/taf`, `/models`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
+- APScheduler: 09:00 tam rapor, 12:00 update, 15:00 risk update, 21:00 sonuç
+- Wunderground final result: API key yoksa scraper + admin manual fallback
+
+## Kurulum
+
+```bash
+cp .env.example .env
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+python -m src.main report --date 2026-05-24
+python -m src.main bot
+```
+
+Gerçek tokenları `.env` içine koy; repo’ya yazma.
+
+## PostgreSQL
+
+Hostinger VPS için önerilen `.env`:
+
+```env
+DATABASE_URL=postgresql+psycopg://ltac:change-me@db:5432/ltac_weather
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHANNEL_ID=@ankarapm
+TELEGRAM_ADMIN_IDS=1374723312
+```
+
+Docker:
+
+```bash
+docker compose up -d --build
+```
+
+Systemd:
+
+```bash
+sudo cp deploy/hostinger-systemd.service /etc/systemd/system/ankara-ltac-weather-bot.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ankara-ltac-weather-bot
+```
+
+## Opsiyonel API key linkleri
+
+V1 için şart değil; kalite/fallback için sonradan eklenebilir.
+
+- CheckWX: https://www.checkwxapi.com/
+- AVWX: https://avwx.rest/
+- Visual Crossing: https://www.visualcrossing.com/weather-api/
+- WeatherAPI: https://www.weatherapi.com/docs/
+- Tomorrow.io: https://docs.tomorrow.io/reference/weather-forecast
+- Meteoblue: https://docs.meteoblue.com/
+- Windy: https://api.windy.com/
+- Weather.com/Wunderground/TWC API: https://developer.weather.com/
+
+## Market çözüm notu
+
+Polymarket Ankara marketi Wunderground Esenboğa Intl Airport Station günlük en yüksek sıcaklığına göre, tam °C hassasiyetle resolve ediyor. Bot bu yüzden tahmini `final_tmax` olarak üretir ama bracket olasılıklarını integer-rounding sınırlarıyla hesaplar. Wunderground statik HTML final değeri göstermediğinde `/result <tmax> <YYYY-MM-DD>` admin komutu ile manuel final kayıt yapılır.
+
+## Güven skoru
+
+0-100 deterministik skor; model spread, model availability, METAR freshness, live/model alignment, cloud/rain uncertainty, TAF availability, backtest history and market liquidity sinyallerinden oluşur. Veri eksikse skor düşer; örnek sayı basılmaz, alan `unavailable` olur.
