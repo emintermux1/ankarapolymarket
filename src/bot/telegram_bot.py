@@ -11,7 +11,13 @@ from src.service import ForecastService
 def build_application(settings: Settings, service: ForecastService) -> Application:
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
-    application = Application.builder().token(settings.telegram_bot_token).build()
+    application = (
+        Application.builder()
+        .token(settings.telegram_bot_token)
+        .post_init(_start_scheduler)
+        .post_shutdown(_shutdown_scheduler)
+        .build()
+    )
     application.bot_data["service"] = service
     application.add_handler(CommandHandler("start", commands.start))
     application.add_handler(CommandHandler("today", commands.today))
@@ -30,3 +36,14 @@ def build_application(settings: Settings, service: ForecastService) -> Applicati
     application.bot_data["scheduler"] = scheduler
     return application
 
+
+async def _start_scheduler(application: Application) -> None:
+    scheduler = application.bot_data["scheduler"]
+    if not scheduler.running:
+        scheduler.start()
+
+
+async def _shutdown_scheduler(application: Application) -> None:
+    scheduler = application.bot_data["scheduler"]
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
