@@ -46,6 +46,7 @@ class TelegramReportRenderer:
                 f"Beklenen maksimum sıcaklık: {_fmt_c(analysis.final_tmax_c)}",
                 f"Ana aralık: {_fmt_c(analysis.main_range_low_c)} - {_fmt_c(analysis.main_range_high_c)}",
                 f"Güven skoru: {analysis.confidence_score}/100",
+                f"Boundary risk: {_boundary_risk(analysis)}",
                 f"Kısa karar: {analysis.verdict}",
                 "",
                 "Canlı gözlem:",
@@ -62,6 +63,9 @@ class TelegramReportRenderer:
                 "",
                 "Market fiyatlaması:",
                 *market_lines,
+                "",
+                "MANUEL BET ÖZETİ ($100 sabit)",
+                *self._manual_bet_lines(analysis, market),
                 "",
                 "Riskler:",
                 f"Yukarı risk: {analysis.risks.get('upward', 'unavailable')}",
@@ -223,32 +227,69 @@ class TelegramReportRenderer:
     def _market_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
         if market is None or not market.valid_for_target:
             return [
-                "* Polymarket link: ilgili market bulunamadı",
+                "* Link: ilgili market bulunamadı",
                 "* Outcome fiyatları: unavailable",
                 "* Hacim: unavailable",
-                "* Spread: unavailable",
                 "* Likidite: unavailable",
-                "* Bot fair probability: unavailable",
                 "* Edge: Edge yok",
                 "* Not: Yatırım tavsiyesi değildir.",
             ]
-        prices = ", ".join(
-            f"{outcome.bracket} {_fmt_pct(outcome.implied_probability)}"
-            for outcome in market.outcomes
-            if outcome.implied_probability is not None
-        ) or "unavailable"
-        spreads = [outcome.spread for outcome in market.outcomes if outcome.spread is not None]
-        fair = ", ".join(f"{key}: %{value * 100:.0f}" for key, value in analysis.fair_probabilities.items()) or "unavailable"
-        return [
-            f"* Polymarket link: {market.link}",
-            f"* Outcome fiyatları: {prices}",
+        lines = [
+            f"* Link: {market.link}",
             f"* Hacim: ${_fmt_num(market.volume)}",
-            f"* Spread: {_fmt_num(max(spreads) if spreads else None)}",
             f"* Likidite: ${_fmt_num(market.liquidity)}",
-            f"* Bot fair probability: {fair}",
-            f"* Edge: {analysis.edge_summary}",
-            "* Not: Yatırım tavsiyesi değildir.",
         ]
+        for outcome in market.outcomes:
+            implied = outcome.implied_probability
+            fair = analysis.fair_probabilities.get(outcome.bracket)
+            edge = fair - implied if fair is not None and implied is not None else None
+            details = [_fmt_cents(implied)]
+            if fair is not None:
+                details.append(f"fair {_fmt_pct(fair)}")
+            if edge is not None:
+                details.append(f"edge {_fmt_pp(edge)}")
+            lines.append(f"* {outcome.bracket}: {', '.join(details)}")
+        lines.append(f"* {analysis.edge_summary}")
+        lines.append("* Not: Yatırım tavsiyesi değildir.")
+        return lines
+
+    def _manual_bet_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
+        candidate = _best_market_candidate(analysis, market)
+        boundary = _boundary_risk(analysis)
+        if candidate is None:
+            return [
+                "* Önerilen bracket: BET YOK",
+                "* Karar: SKIP",
+                "* Sebep: geçerli fiyat/fair probability ile pozitif edge bulunamadı.",
+                "* Not: Yatırım tavsiyesi değildir; manuel karar sende.",
+            ]
+
+        edge, bracket, fair, implied = candidate
+        reasons = []
+        if edge < 0.05:
+            reasons.append("edge eşiği altında")
+        if boundary == "HIGH":
+            reasons.append("boundary HIGH")
+        if implied <= 0.0 or implied >= 1.0:
+            reasons.append("piyasa fiyatı geçersiz")
+        should_bet = not reasons
+
+        lines = [
+            f"* Önerilen bracket: {bracket if should_bet else 'BET YOK'}",
+            f"* En iyi aday{'' if should_bet else ' (işlem yok)'}: {bracket}",
+            f"* Market fiyat: {_fmt_cents(implied)}",
+            f"* Bot fair prob: {_fmt_pct(fair)}",
+            f"* Edge: {_fmt_pp(edge)}",
+            f"* Boundary risk: {boundary}",
+        ]
+        if should_bet:
+            lines.append(f"* Beklenen EV: ${_fmt_num(_expected_profit_usd(100.0, fair, implied))}")
+            lines.append("* Karar: MANUEL ONAY GEREKİR")
+        else:
+            lines.append("* Beklenen EV: gösterilmiyor (SKIP)")
+            lines.append(f"* Karar: SKIP ({'; '.join(reasons)})")
+        lines.append("* Not: Yatırım tavsiyesi değildir; manuel karar sende.")
+        return lines
 
 
 def _fmt_c(value: float | None) -> str:
@@ -263,6 +304,48 @@ def _fmt_num(value: float | int | None) -> str:
 
 def _fmt_pct(value: float | None) -> str:
     return f"{value * 100:.1f}%" if value is not None else "unavailable"
+
+
+def _fmt_cents(value: float | None) -> str:
+    return f"{_fmt_num(value * 100)}¢" if value is not None else "unavailable"
+
+
+def _fmt_pp(value: float | None) -> str:
+    return f"{value * 100:+.1f} pp" if value is not None else "unavailable"
+
+
+def _best_market_candidate(analysis: ForecastAnalysis, market: MarketSnapshot | None) -> tuple[float, str, float, float] | None:
+    if market is None or not market.valid_for_target:
+        return None
+    best: tuple[float, str, float, float] | None = None
+    for outcome in market.outcomes:
+        implied = outcome.implied_probability
+        fair = analysis.fair_probabilities.get(outcome.bracket)
+        if fair is None or implied is None:
+            continue
+        edge = fair - implied
+        if best is None or edge > best[0]:
+            best = (edge, outcome.bracket, fair, implied)
+    return best
+
+
+def _boundary_risk(analysis: ForecastAnalysis) -> str:
+    if analysis.final_tmax_c is None:
+        return "unavailable"
+    nearest_half_degree_distance = round(abs((analysis.final_tmax_c - 0.5) - round(analysis.final_tmax_c - 0.5)), 3)
+    sigma = analysis.probability_sigma_c or 0.0
+    if nearest_half_degree_distance <= 0.3 or sigma >= 1.4:
+        return "HIGH"
+    if nearest_half_degree_distance <= 0.45 or sigma >= 0.9:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _expected_profit_usd(stake_usd: float, fair_probability: float, yes_price: float) -> float | None:
+    if yes_price <= 0.0 or yes_price >= 1.0:
+        return None
+    shares = stake_usd / yes_price
+    return fair_probability * shares - stake_usd
 
 
 def _format_clouds(clouds: list[dict]) -> str:
