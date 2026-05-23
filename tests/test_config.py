@@ -24,6 +24,23 @@ def test_settings_accept_csv_and_json_list_values() -> None:
     assert settings.openmeteo_ensemble_models == ["ecmwf_ifs025", "gfs_seamless"]
 
 
+def test_ankara_telegram_env_aliases_take_precedence() -> None:
+    settings = Settings(
+        TELEGRAM_BOT_TOKEN="wrong",
+        TELEGRAM_CHANNEL_ID="@wrong",
+        TELEGRAM_ADMIN_IDS="1",
+        ANKARA_TELEGRAM_BOT_TOKEN="right",
+        ANKARA_TELEGRAM_CHANNEL_ID="@ankarapm",
+        ANKARA_TELEGRAM_ADMIN_IDS="1374723312",
+        ANKARA_TELEGRAM_ALLOWED_CHAT_IDS="@ankarapm,1374723312",
+    )
+
+    assert settings.telegram_bot_token == "right"
+    assert settings.telegram_channel_id == "@ankarapm"
+    assert settings.telegram_admin_ids == [1374723312]
+    assert settings.telegram_allowed_chat_keys == {"@ankarapm", "1374723312"}
+
+
 def test_default_openmeteo_models_prioritize_ankara_sources() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="")
 

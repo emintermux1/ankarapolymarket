@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -16,13 +16,36 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
-    telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
-    telegram_channel_id: str | None = Field(default=None, alias="TELEGRAM_CHANNEL_ID")
+    telegram_bot_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_BOT_TOKEN", "LTAC_TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
+    )
+    telegram_channel_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_CHANNEL_ID", "LTAC_TELEGRAM_CHANNEL_ID", "TELEGRAM_CHANNEL_ID"),
+    )
     telegram_admin_ids: Annotated[list[int], NoDecode] = Field(
         default_factory=list,
-        alias="TELEGRAM_ADMIN_IDS",
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_ADMIN_IDS", "LTAC_TELEGRAM_ADMIN_IDS", "TELEGRAM_ADMIN_IDS"),
+    )
+    telegram_allowed_chat_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_ALLOWED_CHAT_IDS",
+            "LTAC_TELEGRAM_ALLOWED_CHAT_IDS",
+            "TELEGRAM_ALLOWED_CHAT_IDS",
+        ),
+    )
+    telegram_restrict_commands: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_RESTRICT_COMMANDS",
+            "LTAC_TELEGRAM_RESTRICT_COMMANDS",
+            "TELEGRAM_RESTRICT_COMMANDS",
+        ),
     )
 
     database_url: str = Field(default="sqlite:///./data/ltac_weather_bot.db", alias="DATABASE_URL")
@@ -74,6 +97,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "telegram_admin_ids",
+        "telegram_allowed_chat_ids",
         "polymarket_target_location_terms",
         "openmeteo_models",
         "openmeteo_ensemble_models",
@@ -95,6 +119,14 @@ class Settings(BaseSettings):
     @classmethod
     def parse_admin_ids(cls, value: list[Any]) -> list[int]:
         return [int(item) for item in value]
+
+    @property
+    def telegram_allowed_chat_keys(self) -> set[str]:
+        keys = {str(item).strip().lower() for item in self.telegram_allowed_chat_ids if str(item).strip()}
+        if self.telegram_channel_id:
+            keys.add(str(self.telegram_channel_id).strip().lower())
+        keys.update(str(item) for item in self.telegram_admin_ids)
+        return keys
 
     @property
     def is_sqlite(self) -> bool:

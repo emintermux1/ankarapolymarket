@@ -88,14 +88,15 @@ class LTACForecastEngine:
         factors["probability_sigma_c"] = round(prob_sigma, 2)
         fair_probabilities = _fair_probabilities(final, prob_sigma, market)
         edge_summary = _edge_summary(fair_probabilities, market)
+        main_range_half_width = max(0.5, prob_sigma)
         return ForecastAnalysis(
             target_date=target_date,
             generated_at=datetime.now(timezone.utc),
             report_timezone=self.settings.report_timezone,
             weighted_model_tmax_c=round(base_tmax, 2) if base_tmax is not None else None,
             final_tmax_c=final,
-            main_range_low_c=round(final - 0.5, 1) if final is not None else None,
-            main_range_high_c=round(final + 0.5, 1) if final is not None else None,
+            main_range_low_c=round(final - main_range_half_width, 1) if final is not None else None,
+            main_range_high_c=round(final + main_range_half_width, 1) if final is not None else None,
             model_spread_c=round(spread, 2) if spread is not None else None,
             ensemble_sigma_c=round(ens_sigma, 2) if ens_sigma is not None else None,
             probability_sigma_c=round(prob_sigma, 2),
@@ -210,7 +211,7 @@ def _edge_summary(fair: dict[str, float], market: MarketSnapshot | None) -> str:
             best = (diff, outcome.bracket, probability, implied)
     if best is None or best[0] < 0.05:
         return "Edge yok"
-    return f"Edge var: {best[1]} bot fair %{best[2] * 100:.0f}, piyasa %{best[3] * 100:.0f}"
+    return f"En iyi edge: {best[1]} {best[0] * 100:+.1f}pp; bot fair %{best[2] * 100:.1f}, piyasa %{best[3] * 100:.1f}"
 
 
 def _rationale(

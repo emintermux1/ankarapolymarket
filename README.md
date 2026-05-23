@@ -34,10 +34,13 @@ Hostinger VPS için önerilen `.env`:
 
 ```env
 DATABASE_URL=postgresql+psycopg://ltac:change-me@db:5432/ltac_weather
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHANNEL_ID=@ankarapm
-TELEGRAM_ADMIN_IDS=1374723312
+ANKARA_TELEGRAM_BOT_TOKEN=...
+ANKARA_TELEGRAM_CHANNEL_ID=@ankarapm
+ANKARA_TELEGRAM_ADMIN_IDS=1374723312
+ANKARA_TELEGRAM_ALLOWED_CHAT_IDS=@ankarapm,1374723312
 ```
+
+`ANKARA_TELEGRAM_*` değişkenleri aynı sunucuda başka botlar varsa özellikle tercih edilir; geriye dönük uyumluluk için eski `TELEGRAM_*` adları hâlâ okunur ama Ankara prefix'i varsa o kazanır.
 
 Docker:
 
