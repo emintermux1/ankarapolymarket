@@ -24,6 +24,14 @@ def test_settings_accept_csv_and_json_list_values() -> None:
     assert settings.openmeteo_ensemble_models == ["ecmwf_ifs025", "gfs_seamless"]
 
 
+def test_default_openmeteo_models_prioritize_ankara_sources() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="")
+
+    assert settings.openmeteo_models == ["icon_eu", "ecmwf_ifs025", "icon_global", "gfs_seamless"]
+    assert settings.openmeteo_ensemble_models == ["icon_eu", "ecmwf_ifs025", "icon_global", "gfs_seamless"]
+    assert settings.openmeteo_bias_correction is True
+
+
 @pytest.mark.asyncio
 async def test_scheduler_starts_inside_running_loop(tmp_path) -> None:
     settings = Settings(

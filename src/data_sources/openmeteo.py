@@ -61,9 +61,12 @@ FIELD_MAP = {
 
 ENSEMBLE_ALIASES = {
     "ecmwf_ifs025": ["ecmwf_ifs025", "ecmwf"],
+    "ecmwf_ifs04": ["ecmwf_ifs04"],
     "ecmwf_aifs025": ["ecmwf_aifs025", "aifs"],
     "gfs_seamless": ["gfs", "gefs", "ncep_gefs"],
     "icon_seamless": ["icon", "dwd_icon"],
+    "icon_eu": ["icon_eu"],
+    "icon_global": ["icon_global"],
 }
 
 
@@ -88,6 +91,7 @@ class OpenMeteoAdapter(HttpSource):
                 "forecast_days": 16,
                 "wind_speed_unit": "kn",
                 "cell_selection": "land",
+                "bias_correction": str(self.settings.openmeteo_bias_correction).lower(),
             },
         )
         if not isinstance(payload, dict):
