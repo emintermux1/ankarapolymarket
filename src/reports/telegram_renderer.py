@@ -188,6 +188,8 @@ class TelegramReportRenderer:
         name_map = {
             "icon_eu": "ICON-EU",
             "icon_global": "ICON-Global",
+            "visual_crossing": "Visual Crossing",
+            "tomorrow_io": "Tomorrow.io",
             "ecmwf": "ECMWF",
             "gfs": "GFS",
             "icon": "ICON",
