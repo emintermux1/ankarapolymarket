@@ -110,6 +110,7 @@ class ModelHourlyPoint(BaseModel):
     surface_pressure_hpa: float | None = None
     shortwave_radiation_wm2: float | None = None
     cape_jkg: float | None = None
+    convective_inhibition_jkg: float | None = None
     temperature_850hpa_c: float | None = None
     geopotential_height_500hpa_m: float | None = None
     wind_speed_850hpa_kt: float | None = None

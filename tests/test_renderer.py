@@ -183,6 +183,42 @@ def test_renderer_includes_forum_analysis_in_daily_report() -> None:
     assert "Sinyaller: şimşek/oraj 1" in text
 
 
+def test_renderer_includes_ai_effect_analysis_section() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=datetime.now(timezone.utc),
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=18.0,
+        final_tmax_c=17.5,
+        main_range_low_c=17.0,
+        main_range_high_c=18.0,
+        model_spread_c=0.8,
+        confidence_score=72,
+        confidence_factors={},
+        verdict="17.5°C merkezli kontrollü tahmin",
+        adjustments=[
+            ForecastAdjustment(
+                name="ai_effect_analysis",
+                value_c=0.0,
+                summary="CAPE 850 J/kg, CIN güçlü, rüzgâr 020° / 12 kt",
+                inputs={
+                    "bullets": [
+                        "CAPE: 850 J/kg → Öğleden sonra lokal konveksiyon riski var. Ani bulutlanma sıcaklığı baskılayabilir.",
+                        "CIN: Güçlü → Atmosfer şu an patlamayı baskılıyor. Fırtına oluşumu zor.",
+                    ]
+                },
+            )
+        ],
+    )
+
+    text = renderer.daily_report(analysis=analysis, metar=None, taf=None, model_bundle=None, market=None)
+
+    assert "AI Etki Analizi:" in text
+    assert "• CAPE: 850 J/kg → Öğleden sonra lokal konveksiyon riski var." in text
+
+
 def test_renderer_highlights_temperature_forecast_trends() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)
