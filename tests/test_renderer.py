@@ -275,6 +275,85 @@ def test_renderer_highlights_temperature_forecast_trends() -> None:
     assert "• ICON: 20.0°C\n" in text
 
 
+def test_renderer_adds_cloud_dynamics_panel() -> None:
+    settings = Settings(
+        TELEGRAM_ADMIN_IDS="",
+        TELEGRAM_BOT_TOKEN=None,
+        SATELLITE_MOTION_URL="https://example.com/satellite.gif",
+        RADAR_MOTION_URL="https://example.com/radar.gif",
+    )
+    renderer = TelegramReportRenderer(settings)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=datetime.now(timezone.utc),
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=25.0,
+        final_tmax_c=25.4,
+        main_range_low_c=24.5,
+        main_range_high_c=26.0,
+        model_spread_c=0.4,
+        confidence_score=72,
+        confidence_factors={},
+        verdict="25.4°C merkezli kontrollü tahmin",
+        adjustments=[
+            ForecastAdjustment(
+                name="cloud_radiation",
+                value_c=0.2,
+                summary="10-14 alçak bulut %20, yüksek bulut %60",
+                inputs={"low_cloud_mean_pct": 20, "high_cloud_mean_pct": 60, "shortwave_max_wm2": 780},
+            ),
+            ForecastAdjustment(
+                name="ltac_microclimate",
+                value_c=0.4,
+                summary="Esenboğa batı rüzgârı + pist asfalt etkisi; LTAC sensör offseti",
+                inputs={},
+            ),
+        ],
+    )
+    points = [
+        ModelHourlyPoint(
+            time=datetime(2026, 5, 24, hour, tzinfo=timezone.utc),
+            temperature_2m_c=22.0 + (hour - 10) * 0.4,
+            precipitation_mm=0.20 if hour < 15 else 0.02,
+            cloud_cover_pct=70 - (hour - 10) * 5,
+            wind_direction_10m_deg=270,
+            shortwave_radiation_wm2=700 + (hour - 10) * 10,
+        )
+        for hour in range(10, 19)
+    ]
+    bundle = ModelBundle(
+        fetch_timestamp=datetime.now(timezone.utc),
+        target_date=date(2026, 5, 24),
+        forecasts=[
+            ModelForecast(
+                model="gfs_seamless",
+                available=True,
+                target_date=date(2026, 5, 24),
+                hourly=points,
+                tmax_c=25.0,
+            )
+        ],
+    )
+
+    text = renderer.daily_report(
+        analysis=analysis,
+        metar=None,
+        taf=None,
+        model_bundle=bundle,
+        market=None,
+        recent_observations=[{"tmpc": "21.0"}, {"tmpc": "23.2"}],
+    )
+
+    assert "Bulut dinamiği+:" in text
+    assert "Canlı uydu GIF/link: https://example.com/satellite.gif" in text
+    assert "Radar motion ASCII mini map:" in text
+    assert "Heatmap 10-18:" in text
+    assert "Pist sıcaklık grafiği:" in text
+    assert "Son 6 saat trend: 21.0→23.2°C" in text
+    assert "Bulut yoğunluğu:" in text
+    assert "Güneşlenme:" in text
+
+
 def test_aviation_report_surfaces_wunderground_integer_settlement_rules() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)

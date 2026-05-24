@@ -4,6 +4,7 @@ import math
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from statistics import mean
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.config import Settings
@@ -33,6 +34,7 @@ class TelegramReportRenderer:
         model_bundle: ModelBundle | None,
         market: MarketSnapshot | None,
         forum: ForumAnalysis | None = None,
+        recent_observations: list[dict[str, Any]] | None = None,
         report_label: str | None = None,
         previous_analysis: ForecastAnalysis | None = None,
         previous_model_tmax_c: Mapping[str, float | None] | None = None,
@@ -66,6 +68,15 @@ class TelegramReportRenderer:
                 "",
                 "Hava dinamiği:",
                 *self._dynamic_lines(analysis),
+                "",
+                "Bulut dinamiği+:",
+                *self._cloud_dynamics_lines(
+                    analysis=analysis,
+                    metar=metar,
+                    taf=taf,
+                    model_bundle=model_bundle,
+                    recent_observations=recent_observations or [],
+                ),
                 "",
                 "AI Etki Analizi:",
                 *self._ai_effect_lines(analysis),
@@ -275,12 +286,46 @@ class TelegramReportRenderer:
 
     def _dynamic_lines(self, analysis: ForecastAnalysis) -> list[str]:
         lookup = {item.name: item for item in analysis.adjustments}
-        return [
+        lines = [
             _bullet(f"Canlı sapma: {_adj(lookup.get('live_observation'))}"),
             _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
             _bullet(f"Basınç/üst seviye: {_adj(lookup.get('synoptic_pressure'))}"),
             _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
             _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
+        ]
+        microclimate = lookup.get("ltac_microclimate")
+        if microclimate is not None and microclimate.value_c != 0:
+            lines.append(_bullet(f"İstasyon değişkeni: {_adj(microclimate)}"))
+        return lines
+
+    def _cloud_dynamics_lines(
+        self,
+        *,
+        analysis: ForecastAnalysis,
+        metar: METARNormalized | None,
+        taf: TAFNormalized | None,
+        model_bundle: ModelBundle | None,
+        recent_observations: list[dict[str, Any]],
+    ) -> list[str]:
+        cloud_pct = _cloud_density_pct(analysis, metar, model_bundle)
+        sunshine_pct = _sunshine_pct(analysis, model_bundle)
+        rain_status = _rain_cell_status(taf, model_bundle)
+        opening_status = _opening_after_15(model_bundle)
+        wind_direction = _wind_direction_for_map(metar, model_bundle)
+        trend = _recent_temperature_trend(recent_observations, metar)
+        runway_series = _runway_temperature_series(model_bundle, _adjustment_value(analysis, "ltac_microclimate"))
+        return [
+            _bullet(f"Canlı uydu GIF/link: {self.settings.satellite_motion_url}"),
+            _bullet(f"Radar motion: {self.settings.radar_motion_url}"),
+            _bullet(f"Bulut yoğunluğu: {_fmt_whole_pct(cloud_pct)}"),
+            _bullet(f"Güneşlenme: {_fmt_whole_pct(sunshine_pct)}"),
+            _bullet(f"Yağış hücresi: {rain_status}"),
+            _bullet(f"15:00 sonrası: {opening_status}"),
+            _bullet("Radar motion ASCII mini map:"),
+            *_ascii_radar_map(wind_direction, model_bundle),
+            *_sky_heatmap_lines(model_bundle),
+            _bullet(f"Pist sıcaklık grafiği: {runway_series}"),
+            _bullet(f"Son 6 saat trend: {trend}"),
         ]
 
     def _ai_effect_lines(self, analysis: ForecastAnalysis) -> list[str]:
@@ -794,6 +839,274 @@ def _format_clouds(clouds: list[dict]) -> str:
     if not clouds:
         return "veri yok"
     return ", ".join(f"{cloud.get('cover', '?')}{cloud.get('base', '')}" for cloud in clouds)
+
+
+def _cloud_density_pct(
+    analysis: ForecastAnalysis,
+    metar: METARNormalized | None,
+    model_bundle: ModelBundle | None,
+) -> float | None:
+    model_values = [value for _, value in _hourly_cloud_series(model_bundle, range(10, 15))]
+    if model_values:
+        return round(mean(model_values), 1)
+    layer_values = [
+        _adjustment_input(analysis, "cloud_radiation", "low_cloud_mean_pct"),
+        _adjustment_input(analysis, "cloud_radiation", "mid_cloud_mean_pct"),
+        _adjustment_input(analysis, "cloud_radiation", "high_cloud_mean_pct"),
+    ]
+    layer_values = [value for value in layer_values if value is not None]
+    if layer_values:
+        return round(max(layer_values), 1)
+    if metar and metar.cloud_layers:
+        return _metar_cloud_density(metar.cloud_layers)
+    return None
+
+
+def _sunshine_pct(analysis: ForecastAnalysis, model_bundle: ModelBundle | None) -> float | None:
+    candidates: list[float] = []
+    shortwave = [value for _, value in _hourly_mean_series(model_bundle, "shortwave_radiation_wm2", range(10, 15))]
+    if shortwave:
+        candidates.append(max(shortwave) / 850.0 * 100.0)
+    low = _adjustment_input(analysis, "cloud_radiation", "low_cloud_mean_pct")
+    mid = _adjustment_input(analysis, "cloud_radiation", "mid_cloud_mean_pct")
+    high = _adjustment_input(analysis, "cloud_radiation", "high_cloud_mean_pct")
+    opacity_parts = [
+        (low, 0.70),
+        (mid, 0.45),
+        (high, 0.25),
+    ]
+    opacity = sum(value * weight for value, weight in opacity_parts if value is not None)
+    if opacity:
+        candidates.append(100.0 - min(100.0, opacity))
+    elif (cloud_pct := _cloud_density_pct(analysis, None, model_bundle)) is not None:
+        candidates.append(100.0 - cloud_pct * 0.65)
+    if not candidates:
+        return None
+    return round(max(0.0, min(100.0, mean(candidates))), 1)
+
+
+def _rain_cell_status(taf: TAFNormalized | None, model_bundle: ModelBundle | None) -> str:
+    precip = _hourly_mean_series(model_bundle, "precipitation_mm", range(9, 19))
+    taf_risk = bool(taf and taf.rain_or_storm_risk)
+    if not precip:
+        return "TAF yağış/CB riski var; canlı radar takip" if taf_risk else "veri yok"
+    early = [value for hour, value in precip if 9 <= hour <= 14]
+    late = [value for hour, value in precip if hour >= 15]
+    early_mean = mean(early) if early else 0.0
+    late_mean = mean(late) if late else 0.0
+    max_precip = max(value for _, value in precip)
+    if max_precip < 0.1 and not taf_risk:
+        return "zayıf / belirgin hücre yok"
+    if late_mean + 0.05 < early_mean:
+        return f"zayıflıyor ({early_mean:.2f}→{late_mean:.2f} mm/saat)"
+    if late_mean > early_mean + 0.05:
+        return f"güçleniyor ({early_mean:.2f}→{late_mean:.2f} mm/saat)"
+    if taf_risk:
+        return "TAF yağış/CB riski var; radar teyidi gerekli"
+    return f"zayıf-stabil (maks {max_precip:.2f} mm/saat)"
+
+
+def _opening_after_15(model_bundle: ModelBundle | None) -> str:
+    cloud = _hourly_cloud_series(model_bundle, range(11, 19))
+    if not cloud:
+        return "veri yok"
+    early = [value for hour, value in cloud if 11 <= hour <= 14]
+    late = [value for hour, value in cloud if hour >= 15]
+    if not early or not late:
+        return "veri yok"
+    early_mean = mean(early)
+    late_mean = mean(late)
+    if late_mean <= early_mean - 12.0:
+        return f"gökyüzü açabilir (bulut %{early_mean:.0f}→%{late_mean:.0f})"
+    if late_mean <= 45.0:
+        return f"parçalı/açık kalabilir (15+ bulut %{late_mean:.0f})"
+    return f"net açılma sinyali yok (15+ bulut %{late_mean:.0f})"
+
+
+def _ascii_radar_map(wind_direction: float | None, model_bundle: ModelBundle | None) -> list[str]:
+    flow = _wind_flow_label(wind_direction)
+    rain_marker = _rain_marker(model_bundle)
+    return [
+        "  NW       N       NE",
+        f"  W     LTAC     E    akış: {flow}",
+        f"  SW       S       SE   hücre: {rain_marker}",
+    ]
+
+
+def _sky_heatmap_lines(model_bundle: ModelBundle | None) -> list[str]:
+    cloud = _hourly_cloud_series(model_bundle, range(10, 19))
+    if not cloud:
+        return [_bullet("Heatmap 10-18: veri yok")]
+    hours = [hour for hour, _ in cloud]
+    cloud_values = [value for _, value in cloud]
+    sunshine_values = [max(0.0, min(100.0, 100.0 - value * 0.65)) for value in cloud_values]
+    precip_lookup = dict(_hourly_mean_series(model_bundle, "precipitation_mm", hours))
+    precip_values = [precip_lookup.get(hour, 0.0) for hour in hours]
+    precip_max = max(1.0, max(precip_values, default=0.0))
+    return [
+        _bullet("Heatmap 10-18:"),
+        f"  Saat  : {' '.join(f'{hour:02d}' for hour in hours)}",
+        f"  Bulut : {_sparkline(cloud_values, 0.0, 100.0)}",
+        f"  Güneş : {_sparkline(sunshine_values, 0.0, 100.0)}",
+        f"  Yağış : {_sparkline(precip_values, 0.0, precip_max)}",
+    ]
+
+
+def _runway_temperature_series(model_bundle: ModelBundle | None, offset_c: float) -> str:
+    temps = _hourly_mean_series(model_bundle, "temperature_2m_c", range(10, 19))
+    if not temps:
+        return "veri yok"
+    values = [value + offset_c for _, value in temps]
+    hours = [hour for hour, _ in temps]
+    return f"{hours[0]:02d}-{hours[-1]:02d} {values[0]:.1f}→{values[-1]:.1f}°C {_sparkline(values)} (offset {offset_c:+.1f}°C)"
+
+
+def _recent_temperature_trend(rows: list[dict[str, Any]], metar: METARNormalized | None) -> str:
+    values = [_safe_float(row.get("tmpc")) for row in rows]
+    values = [value for value in values if value is not None]
+    if metar and (not values or abs(values[-1] - metar.temperature_c) > 0.05):
+        values.append(metar.temperature_c)
+    if not values:
+        return "veri yok"
+    if len(values) == 1:
+        return f"{values[0]:.1f}°C (tek gözlem)"
+    delta = values[-1] - values[0]
+    return f"{values[0]:.1f}→{values[-1]:.1f}°C ({delta:+.1f}) {_sparkline(values)}"
+
+
+def _hourly_cloud_series(model_bundle: ModelBundle | None, hours: range) -> list[tuple[int, float]]:
+    return _hourly_point_series(model_bundle, hours, _cloud_cover_for_point)
+
+
+def _hourly_mean_series(model_bundle: ModelBundle | None, attr: str, hours: range | list[int]) -> list[tuple[int, float]]:
+    return _hourly_point_series(model_bundle, hours, lambda point: getattr(point, attr, None))
+
+
+def _hourly_point_series(model_bundle: ModelBundle | None, hours: range | list[int], getter: Any) -> list[tuple[int, float]]:
+    if model_bundle is None:
+        return []
+    series: list[tuple[int, float]] = []
+    for hour in hours:
+        values = []
+        for forecast in model_bundle.forecasts:
+            for point in forecast.hourly:
+                if point.time.hour != hour:
+                    continue
+                value = getter(point)
+                if value is not None:
+                    values.append(float(value))
+        if values:
+            series.append((int(hour), mean(values)))
+    return series
+
+
+def _cloud_cover_for_point(point: Any) -> float | None:
+    if point.cloud_cover_pct is not None:
+        return float(point.cloud_cover_pct)
+    layers = [
+        point.cloud_cover_low_pct,
+        point.cloud_cover_mid_pct,
+        point.cloud_cover_high_pct,
+    ]
+    values = [float(value) for value in layers if value is not None]
+    return max(values) if values else None
+
+
+def _metar_cloud_density(clouds: list[dict]) -> float | None:
+    cover_map = {
+        "SKC": 0.0,
+        "CLR": 0.0,
+        "NSC": 0.0,
+        "NCD": 0.0,
+        "FEW": 20.0,
+        "SCT": 45.0,
+        "BKN": 75.0,
+        "OVC": 95.0,
+    }
+    values = []
+    for cloud in clouds:
+        cover = str(cloud.get("cover") or cloud.get("type") or "").upper()
+        if cover in cover_map:
+            values.append(cover_map[cover])
+    return max(values) if values else None
+
+
+def _wind_direction_for_map(metar: METARNormalized | None, model_bundle: ModelBundle | None) -> float | None:
+    if metar and metar.wind_direction_deg is not None:
+        return float(metar.wind_direction_deg)
+    values = [value for _, value in _hourly_mean_series(model_bundle, "wind_direction_10m_deg", range(10, 15))]
+    return _circular_mean(values) if values else None
+
+
+def _rain_marker(model_bundle: ModelBundle | None) -> str:
+    values = [value for _, value in _hourly_mean_series(model_bundle, "precipitation_mm", range(9, 19))]
+    if not values or max(values) < 0.1:
+        return "· zayıf"
+    if max(values) < 0.5:
+        return "~ orta/zayıf"
+    return "█ aktif"
+
+
+def _wind_flow_label(direction: float | None) -> str:
+    if direction is None:
+        return "veri yok"
+    source = _cardinal(direction)
+    target = _cardinal((direction + 180.0) % 360.0)
+    return f"{source}→{target}"
+
+
+def _cardinal(direction: float) -> str:
+    labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    return labels[int((direction + 22.5) // 45) % 8]
+
+
+def _sparkline(values: list[float], minimum: float | None = None, maximum: float | None = None) -> str:
+    if not values:
+        return "veri yok"
+    blocks = "▁▂▃▄▅▆▇█"
+    low = min(values) if minimum is None else minimum
+    high = max(values) if maximum is None else maximum
+    if high <= low:
+        return blocks[0] * len(values)
+    chars = []
+    for value in values:
+        ratio = max(0.0, min(1.0, (value - low) / (high - low)))
+        chars.append(blocks[round(ratio * (len(blocks) - 1))])
+    return "".join(chars)
+
+
+def _adjustment_value(analysis: ForecastAnalysis, name: str) -> float:
+    adjustment = next((item for item in analysis.adjustments if item.name == name), None)
+    return adjustment.value_c if adjustment is not None else 0.0
+
+
+def _adjustment_input(analysis: ForecastAnalysis, name: str, key: str) -> float | None:
+    adjustment = next((item for item in analysis.adjustments if item.name == name), None)
+    if adjustment is None:
+        return None
+    return _safe_float(adjustment.inputs.get(key))
+
+
+def _fmt_whole_pct(value: float | None) -> str:
+    return f"%{value:.0f}" if value is not None else "veri yok"
+
+
+def _safe_float(value: Any) -> float | None:
+    if value in (None, "", "M"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _circular_mean(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    sin_sum = sum(math.sin(math.radians(value)) for value in values)
+    cos_sum = sum(math.cos(math.radians(value)) for value in values)
+    angle = math.degrees(math.atan2(sin_sum, cos_sum))
+    return angle + 360 if angle < 0 else angle
 
 
 def _adj(adjustment: object | None) -> str:

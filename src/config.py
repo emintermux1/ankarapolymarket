@@ -74,6 +74,15 @@ class Settings(BaseSettings):
         alias="OPENMETEO_ENSEMBLE_MODELS",
     )
     openmeteo_bias_correction: bool = Field(default=True, alias="OPENMETEO_BIAS_CORRECTION")
+    ltac_westerly_runway_bias_c: float = Field(default=0.4, alias="LTAC_WESTERLY_RUNWAY_BIAS_C")
+    satellite_motion_url: str = Field(
+        default="https://www.windy.com/40.128/32.995/satellite?40.128,32.995,9",
+        alias="SATELLITE_MOTION_URL",
+    )
+    radar_motion_url: str = Field(
+        default="https://www.windy.com/40.128/32.995/radar?40.128,32.995,9",
+        alias="RADAR_MOTION_URL",
+    )
 
     http_timeout_seconds: float = Field(default=20.0, alias="HTTP_TIMEOUT_SECONDS")
     http_retries: int = Field(default=2, alias="HTTP_RETRIES")
