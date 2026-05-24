@@ -69,6 +69,9 @@ class TelegramReportRenderer:
                 "Esenboğa nowcasting:",
                 *self._nowcasting_lines(analysis.nowcasting_signals),
                 "",
+                "AI Etki Analizi:",
+                *self._ai_effect_lines(analysis),
+                "",
                 "Neden bu tahmin?",
                 *self._rationale_lines(analysis),
                 "",
@@ -287,6 +290,13 @@ class TelegramReportRenderer:
             suffix = f" — {signal.summary}" if signal.summary else ""
             lines.append(_bullet(f"{signal.label}: {signal.state}{suffix}"))
         return lines
+
+    def _ai_effect_lines(self, analysis: ForecastAnalysis) -> list[str]:
+        adjustment = next((item for item in analysis.adjustments if item.name == "ai_effect_analysis"), None)
+        bullets = adjustment.inputs.get("bullets") if adjustment else None
+        if not isinstance(bullets, list) or not bullets:
+            return [_bullet("CAPE/CIN/rüzgâr etki analizi: veri yok")]
+        return [_bullet(str(item)) for item in bullets]
 
     def _rationale_lines(self, analysis: ForecastAnalysis) -> list[str]:
         if not analysis.rationale_bullets:
