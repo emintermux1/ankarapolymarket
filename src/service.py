@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from src.config import Settings
@@ -37,6 +37,7 @@ class ForecastContext:
     taf: TAFNormalized | None
     model_bundle: ModelBundle | None
     market: MarketSnapshot | None
+    recent_observations: list[dict]
 
 
 class ForecastService:
@@ -60,11 +61,12 @@ class ForecastService:
 
     async def build_forecast_context(self, target_date: date | None = None, report_label: str = "manual") -> ForecastContext:
         target = target_date or self.default_target_date()
-        metar, taf, bundle, market = await asyncio.gather(
+        metar, taf, bundle, market, recent_observations = await asyncio.gather(
             self._safe_metar(),
             self._safe_taf(),
             self._safe_models(target),
             self._safe_market(target),
+            self._safe_recent_observations(target),
         )
         if metar:
             self.repository.save_observation(metar)
@@ -83,7 +85,14 @@ class ForecastService:
             historical_weights=historical_weights,
         )
         self.repository.save_forecast_analysis(analysis, report_label=report_label)
-        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market)
+        return ForecastContext(
+            analysis=analysis,
+            metar=metar,
+            taf=taf,
+            model_bundle=bundle,
+            market=market,
+            recent_observations=recent_observations,
+        )
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
@@ -93,6 +102,7 @@ class ForecastService:
             taf=ctx.taf,
             model_bundle=ctx.model_bundle,
             market=ctx.market,
+            recent_observations=ctx.recent_observations,
             report_label=report_label,
         )
         return report
@@ -240,3 +250,16 @@ class ForecastService:
             return await self.polymarket.get_market(target_date)
         except Exception:
             return None
+
+    async def _safe_recent_observations(self, target_date: date) -> list[dict]:
+        try:
+            tz = ZoneInfo(self.settings.report_timezone)
+            now_local = datetime.now(tz)
+            if target_date == now_local.date():
+                end_at = now_local
+            else:
+                end_at = datetime.combine(target_date, time(hour=18), tzinfo=tz)
+            start_at = end_at - timedelta(hours=6)
+            return await self.iem.fetch_history(start_at, end_at)
+        except Exception:
+            return []
