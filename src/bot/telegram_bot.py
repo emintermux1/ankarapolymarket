@@ -25,6 +25,7 @@ def build_application(settings: Settings, service: ForecastService) -> Applicati
     application.add_handler(CommandHandler("metar", commands.metar))
     application.add_handler(CommandHandler("taf", commands.taf))
     application.add_handler(CommandHandler("models", commands.models))
+    application.add_handler(CommandHandler("forum", commands.forum))
     application.add_handler(CommandHandler("market", commands.market))
     application.add_handler(CommandHandler("edge", commands.edge))
     application.add_handler(CommandHandler("aviation", commands.aviation))

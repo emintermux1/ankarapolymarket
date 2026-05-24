@@ -97,6 +97,15 @@ class Settings(BaseSettings):
     mapbox_api_key: str | None = Field(default=None, alias="MAPBOX_API_KEY")
     cesium_ion_token: str | None = Field(default=None, alias="CESIUM_ION_TOKEN")
     here_api_key: str | None = Field(default=None, alias="HERE_API_KEY")
+    havaforum_thread_url: str = Field(
+        default="https://forum.havaforum.com/thread/8893-ankara-%C3%B6zel-raporlar-yorumlar/",
+        alias="HAVAFORUM_THREAD_URL",
+    )
+    havaforum_page_window: int = Field(default=3, ge=1, le=10, alias="HAVAFORUM_PAGE_WINDOW")
+    havaforum_include_previous_day_tomorrow_posts: bool = Field(
+        default=True,
+        alias="HAVAFORUM_INCLUDE_PREVIOUS_DAY_TOMORROW_POSTS",
+    )
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")

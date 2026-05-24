@@ -7,6 +7,8 @@ from src.data_sources.schemas import (
     ActualResult,
     ForecastAdjustment,
     ForecastAnalysis,
+    ForumAnalysis,
+    ForumPost,
     MarketOutcome,
     MarketSnapshot,
     METARNormalized,
@@ -128,6 +130,57 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     assert "Basınç/üst seviye: 06-09→12-15 basınç trendi -2.0 hPa" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
+
+
+def test_renderer_includes_forum_analysis_in_daily_report() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    generated_at = datetime.now(timezone.utc)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=generated_at,
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=18.0,
+        final_tmax_c=17.5,
+        main_range_low_c=17.0,
+        main_range_high_c=18.0,
+        model_spread_c=0.8,
+        confidence_score=72,
+        confidence_factors={},
+        verdict="17.5°C merkezli kontrollü tahmin",
+    )
+    forum = ForumAnalysis(
+        fetch_timestamp=generated_at,
+        target_date=date(2026, 5, 24),
+        thread_url="https://forum.havaforum.com/thread/8893-ankara/",
+        posts=[
+            ForumPost(
+                post_id="1",
+                url="https://forum.havaforum.com/thread/8893-ankara/?postID=1#post1",
+                published_at=generated_at,
+                text="Etimesgutta göz gözü görmüyor bolca şimşek aktivitesi var.",
+            )
+        ],
+        same_day_post_count=1,
+        latest_post_at=generated_at,
+        locations=["Etimesgut"],
+        signals={"şimşek/oraj": 1},
+        summary="1 hedef gün bağlantılı mesaj; sinyal: şimşek/oraj 1; bölgeler: Etimesgut.",
+    )
+
+    text = renderer.daily_report(
+        analysis=analysis,
+        metar=None,
+        taf=None,
+        model_bundle=None,
+        market=None,
+        forum=forum,
+    )
+
+    assert "Forum analizi:" in text
+    assert "HavaForum: veri yok" not in text
+    assert "Öne çıkan bölgeler: Etimesgut" in text
+    assert "Sinyaller: şimşek/oraj 1" in text
 
 
 def test_renderer_highlights_temperature_forecast_trends() -> None:

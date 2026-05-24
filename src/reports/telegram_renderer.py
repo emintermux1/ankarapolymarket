@@ -10,6 +10,7 @@ from src.config import Settings
 from src.data_sources.schemas import (
     ActualResult,
     ForecastAnalysis,
+    ForumAnalysis,
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
@@ -31,6 +32,7 @@ class TelegramReportRenderer:
         taf: TAFNormalized | None,
         model_bundle: ModelBundle | None,
         market: MarketSnapshot | None,
+        forum: ForumAnalysis | None = None,
         report_label: str | None = None,
         previous_analysis: ForecastAnalysis | None = None,
         previous_model_tmax_c: Mapping[str, float | None] | None = None,
@@ -67,6 +69,9 @@ class TelegramReportRenderer:
                 "",
                 "Neden bu tahmin?",
                 *self._rationale_lines(analysis),
+                "",
+                "Forum analizi:",
+                *self._forum_lines(forum),
                 "",
                 "Market fiyatlaması:",
                 *self._market_lines(analysis, market),
@@ -173,6 +178,9 @@ class TelegramReportRenderer:
         lines.append("Not: Yatırım tavsiyesi değildir.")
         return "\n".join(lines)
 
+    def forum_report(self, forum: ForumAnalysis | None) -> str:
+        return "\n".join(["HAVAFORUM ANKARA ANALİZİ", *self._forum_lines(forum, include_examples=True)])
+
     def sources_report(self, health: list[SourceHealth]) -> str:
         if not health:
             return "Kaynak durumu henüz kaydedilmedi."
@@ -276,6 +284,31 @@ class TelegramReportRenderer:
         if not analysis.rationale_bullets:
             return [_bullet("Veri eksik; gerekçe üretilemedi.")]
         return [_bullet(bullet) for bullet in analysis.rationale_bullets]
+
+    def _forum_lines(self, forum: ForumAnalysis | None, *, include_examples: bool = False) -> list[str]:
+        if forum is None:
+            return [_bullet("HavaForum: veri yok")]
+        if forum.unavailable_reason:
+            return [_bullet(f"HavaForum: {forum.unavailable_reason}")]
+        lines = [
+            _bullet(f"Özet: {forum.summary}"),
+            _bullet(f"Mesaj kapsamı: {forum.same_day_post_count} aynı gün, {forum.previous_day_tomorrow_post_count} önceki gün 'yarın' bağlamı"),
+        ]
+        if forum.latest_post_at:
+            lines.append(_bullet(f"Son forum mesajı: {forum.latest_post_at.astimezone(self.tz):%Y-%m-%d %H:%M}"))
+        if forum.locations:
+            lines.append(_bullet(f"Öne çıkan bölgeler: {', '.join(forum.locations[:5])}"))
+        if forum.signals:
+            signals = ", ".join(f"{name} {count}" for name, count in list(forum.signals.items())[:4])
+            lines.append(_bullet(f"Sinyaller: {signals}"))
+        if include_examples:
+            for post in forum.posts[-3:]:
+                text = " ".join(post.text.split())
+                if len(text) > 180:
+                    text = f"{text[:177]}..."
+                author = f"{post.author}: " if post.author else ""
+                lines.append(_bullet(f"{post.published_at.astimezone(self.tz):%H:%M} {author}{text}"))
+        return lines
 
     def _market_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
         if market is None:
