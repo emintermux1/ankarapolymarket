@@ -21,7 +21,7 @@ def calculate_cloud_radiation_adjustment(forecasts: list[ModelForecast]) -> Fore
             if point.shortwave_radiation_wm2 is not None:
                 shortwave.append(point.shortwave_radiation_wm2)
     if not low and not mid and not shortwave:
-        return ForecastAdjustment(name="cloud_radiation", value_c=0.0, summary="cloud/radiation unavailable", inputs={})
+        return ForecastAdjustment(name="cloud_radiation", value_c=0.0, summary="bulut/radyasyon verisi yok", inputs={})
 
     low_mean = mean(low) if low else None
     mid_mean = mean(mid) if mid else None
@@ -58,4 +58,3 @@ def calculate_cloud_radiation_adjustment(forecasts: list[ModelForecast]) -> Fore
             "cloud_uncertainty_pct": cloud_uncertainty,
         },
     )
-
