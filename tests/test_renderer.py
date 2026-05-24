@@ -107,6 +107,7 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
         verdict="17.5°C merkezli kontrollü tahmin",
         adjustments=[
             ForecastAdjustment(name="live_observation", value_c=0.0, summary="METAR hedef gün değil", inputs={}),
+            ForecastAdjustment(name="synoptic_pressure", value_c=-0.2, summary="06-09→12-15 basınç trendi -2.0 hPa", inputs={}),
             ForecastAdjustment(name="ltac_microclimate", value_c=0.0, summary="placeholder", inputs={}),
         ],
     )
@@ -120,6 +121,7 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     )
     assert text.startswith("ANKARA ESENBOĞA ÖĞLE GÜNCELLEMESİ")
     assert "Canlı sapma: METAR hedef gün değil" in text
+    assert "Basınç/üst seviye: 06-09→12-15 basınç trendi -2.0 hPa" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
 

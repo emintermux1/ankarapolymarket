@@ -30,24 +30,16 @@ def calculate_upper_air_profile_adjustment(forecasts: list[ModelForecast]) -> Fo
             value -= 0.35
         elif inversion_strength >= 2.0:
             value -= 0.2
-    if temp_850_mid is not None:
-        if temp_850_mid >= 16.0:
-            value += 0.25
-        elif temp_850_mid <= 5.0:
-            value -= 0.25
-    if height_500_mid is not None:
-        if height_500_mid >= 5800:
-            value += 0.15
-        elif height_500_mid <= 5600:
-            value -= 0.2
+    if temp_925_mid is not None:
+        if temp_925_mid >= 20.0 and (inversion_strength is None or inversion_strength < 2.0):
+            value += 0.1
+        elif temp_925_mid <= 8.0:
+            value -= 0.1
     if rh_700_mid is not None:
         if rh_700_mid >= 80:
             value -= 0.2
         elif rh_700_mid <= 35:
             value += 0.1
-    if cape_max is not None and cape_max >= 1000:
-        value -= 0.15
-
     summary = _summary(
         inversion_strength=inversion_strength,
         temp_925_mid=temp_925_mid,
@@ -59,7 +51,7 @@ def calculate_upper_air_profile_adjustment(forecasts: list[ModelForecast]) -> Fo
     )
     return ForecastAdjustment(
         name="upper_air_profile",
-        value_c=round(max(-0.8, min(0.5, value)), 2),
+        value_c=round(max(-0.6, min(0.3, value)), 2),
         summary=summary,
         inputs={
             "morning_inversion_strength_c": inversion_strength,
