@@ -72,7 +72,7 @@ def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
 
     text = renderer.daily_report(analysis=analysis, metar=None, taf=None, model_bundle=None, market=market)
 
-    assert "Boundary risk: HIGH" in text
+    assert "Sınır riski: YÜKSEK" in text
     assert "* 20°C: 2.1¢, fair 16.1%, edge +14.0 pp" in text
     assert "* Önerilen bracket: BET YOK" in text
     assert "* En iyi aday (işlem yok): 20°C" in text

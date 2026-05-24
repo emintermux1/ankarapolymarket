@@ -284,8 +284,8 @@ class TelegramReportRenderer:
         reasons = []
         if edge < 0.05:
             reasons.append("edge eşiği altında")
-        if boundary == "HIGH":
-            reasons.append("boundary HIGH")
+        if boundary == "YÜKSEK":
+            reasons.append("sınır riski YÜKSEK")
         if implied <= 0.0 or implied >= 1.0:
             reasons.append("piyasa fiyatı geçersiz")
         should_bet = not reasons
@@ -296,7 +296,7 @@ class TelegramReportRenderer:
             f"* Market fiyat: {_fmt_cents(implied)}",
             f"* Bot fair prob: {_fmt_pct(fair)}",
             f"* Edge: {_fmt_pp(edge)}",
-            f"* Boundary risk: {boundary}",
+            f"* Sınır riski: {boundary}",
         ]
         if should_bet:
             lines.append(f"* Beklenen EV: ${_fmt_num(_expected_profit_usd(100.0, fair, implied))}")
@@ -441,10 +441,10 @@ def _boundary_risk(analysis: ForecastAnalysis) -> str:
     nearest_half_degree_distance = round(abs((analysis.final_tmax_c - 0.5) - round(analysis.final_tmax_c - 0.5)), 3)
     sigma = analysis.probability_sigma_c or 0.0
     if nearest_half_degree_distance <= 0.3 or sigma >= 1.4:
-        return "HIGH"
+        return "YÜKSEK"
     if nearest_half_degree_distance <= 0.45 or sigma >= 0.9:
-        return "MEDIUM"
-    return "LOW"
+        return "ORTA"
+    return "DÜŞÜK"
 
 
 def _expected_profit_usd(stake_usd: float, fair_probability: float, yes_price: float) -> float | None:
