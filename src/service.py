@@ -128,6 +128,25 @@ class ForecastService:
         ctx = await self.build_forecast_context(target_date=target_date, report_label="edge")
         return self.renderer.market_report(ctx.analysis, ctx.market)
 
+    async def render_aviation(self, target_date: date | None = None) -> str:
+        target = target_date or self.default_target_date()
+        ctx = await self.build_forecast_context(target_date=target, report_label="aviation")
+        today = self.default_target_date()
+        wunderground_result, intraday_result = await asyncio.gather(
+            self._safe_wunderground_result(target) if target < today else _none(),
+            self._safe_iem_intraday_high(target) if target <= today else _none(),
+        )
+        return self.renderer.aviation_report(
+            analysis=ctx.analysis,
+            metar=ctx.metar,
+            taf=ctx.taf,
+            model_bundle=ctx.model_bundle,
+            market=ctx.market,
+            wunderground_result=wunderground_result,
+            intraday_result=intraday_result,
+            wunderground_url=self.wunderground.daily_url(target),
+        )
+
     def render_backtest(self) -> str:
         return self.renderer.backtest_report(self.repository.latest_backtest_summary())
 
@@ -240,3 +259,19 @@ class ForecastService:
             return await self.polymarket.get_market(target_date)
         except Exception:
             return None
+
+    async def _safe_wunderground_result(self, target_date: date) -> ActualResult | None:
+        try:
+            return await self.wunderground.get_daily_result(target_date)
+        except Exception:
+            return None
+
+    async def _safe_iem_intraday_high(self, target_date: date) -> ActualResult | None:
+        try:
+            return await self.iem.get_intraday_high(target_date)
+        except Exception:
+            return None
+
+
+async def _none() -> None:
+    return None
