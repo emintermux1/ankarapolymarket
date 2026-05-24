@@ -20,9 +20,10 @@ class PolymarketAviationReader(HttpSource):
         self.data_trades_url = "https://data-api.polymarket.com/trades"
 
     async def get_market(self, target_date: date | None = None) -> MarketSnapshot | None:
+        slug = _slug_for_date(target_date) if target_date else self.settings.polymarket_event_slug
         payload = await self._request_json(
             self.gamma_events_url,
-            params={"slug": self.settings.polymarket_event_slug},
+            params={"slug": slug},
         )
         if not isinstance(payload, list) or not payload:
             return None
@@ -214,3 +215,13 @@ def _extract_date_from_event(event: dict[str, Any]) -> date | None:
         return date(year, month, int(month_match.group(2)))
     return None
 
+
+_MONTH_NAMES = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+]
+
+
+def _slug_for_date(target_date: date) -> str:
+    month = _MONTH_NAMES[target_date.month - 1]
+    return f"highest-temperature-in-ankara-on-{month}-{target_date.day}-{target_date.year}"

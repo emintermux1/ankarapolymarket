@@ -114,6 +114,8 @@ class ModelHourlyPoint(BaseModel):
     geopotential_height_500hpa_m: float | None = None
     wind_speed_850hpa_kt: float | None = None
     wind_direction_850hpa_deg: float | None = None
+    cloud_base_m: float | None = None
+    cloud_ceiling_m: float | None = None
 
 
 class ModelForecast(BaseModel):

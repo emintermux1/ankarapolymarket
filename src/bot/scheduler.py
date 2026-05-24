@@ -74,3 +74,4 @@ async def _send_long(application: Application, chat_id: str, text: str) -> None:
             link_preview_options=_DISABLE_LINK_PREVIEWS,
         )
         text = text[len(chunk):].lstrip()
+

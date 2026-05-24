@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -16,13 +16,36 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
-    telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
-    telegram_channel_id: str | None = Field(default=None, alias="TELEGRAM_CHANNEL_ID")
+    telegram_bot_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_BOT_TOKEN", "LTAC_TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
+    )
+    telegram_channel_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_CHANNEL_ID", "LTAC_TELEGRAM_CHANNEL_ID", "TELEGRAM_CHANNEL_ID"),
+    )
     telegram_admin_ids: Annotated[list[int], NoDecode] = Field(
         default_factory=list,
-        alias="TELEGRAM_ADMIN_IDS",
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_ADMIN_IDS", "LTAC_TELEGRAM_ADMIN_IDS", "TELEGRAM_ADMIN_IDS"),
+    )
+    telegram_allowed_chat_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_ALLOWED_CHAT_IDS",
+            "LTAC_TELEGRAM_ALLOWED_CHAT_IDS",
+            "TELEGRAM_ALLOWED_CHAT_IDS",
+        ),
+    )
+    telegram_restrict_commands: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_RESTRICT_COMMANDS",
+            "LTAC_TELEGRAM_RESTRICT_COMMANDS",
+            "TELEGRAM_RESTRICT_COMMANDS",
+        ),
     )
 
     database_url: str = Field(default="sqlite:///./data/ltac_weather_bot.db", alias="DATABASE_URL")
@@ -64,16 +87,35 @@ class Settings(BaseSettings):
     checkwx_api_key: str | None = Field(default=None, alias="CHECKWX_API_KEY")
     avwx_api_key: str | None = Field(default=None, alias="AVWX_API_KEY")
     visualcrossing_api_key: str | None = Field(default=None, alias="VISUALCROSSING_API_KEY")
+    visualcrossing_location: str = Field(default="ankara esenboğa", alias="VISUALCROSSING_LOCATION")
     weatherapi_api_key: str | None = Field(default=None, alias="WEATHERAPI_API_KEY")
     tomorrow_api_key: str | None = Field(default=None, alias="TOMORROW_API_KEY")
     meteoblue_api_key: str | None = Field(default=None, alias="METEOBLUE_API_KEY")
     windy_api_key: str | None = Field(default=None, alias="WINDY_API_KEY")
+    google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
+    maptiler_api_key: str | None = Field(default=None, alias="MAPTILER_API_KEY")
+    mapbox_api_key: str | None = Field(default=None, alias="MAPBOX_API_KEY")
+    cesium_ion_token: str | None = Field(default=None, alias="CESIUM_ION_TOKEN")
+    here_api_key: str | None = Field(default=None, alias="HERE_API_KEY")
+
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    llm_report_summary: bool = Field(default=True, alias="LLM_REPORT_SUMMARY")
+
+    polymarket_api_key: str | None = Field(default=None, alias="POLYMARKET_API_KEY")
+    polymarket_secret: str | None = Field(default=None, alias="POLYMARKET_SECRET")
+    polymarket_passphrase: str | None = Field(default=None, alias="POLYMARKET_PASSPHRASE")
+    polymarket_relayer_api_key: str | None = Field(default=None, alias="POLYMARKET_RELAYER_API_KEY")
+    polymarket_relayer_api_key_address: str | None = Field(default=None, alias="POLYMARKET_RELAYER_API_KEY_ADDRESS")
+    polymarket_signer_address: str | None = Field(default=None, alias="POLYMARKET_SIGNER_ADDRESS")
+    polymarket_trading_enabled: bool = Field(default=False, alias="POLYMARKET_TRADING_ENABLED")
 
     data_dir: Path = Path("data")
     chart_dir: Path = Path("data/charts")
 
     @field_validator(
         "telegram_admin_ids",
+        "telegram_allowed_chat_ids",
         "polymarket_target_location_terms",
         "openmeteo_models",
         "openmeteo_ensemble_models",
@@ -95,6 +137,14 @@ class Settings(BaseSettings):
     @classmethod
     def parse_admin_ids(cls, value: list[Any]) -> list[int]:
         return [int(item) for item in value]
+
+    @property
+    def telegram_allowed_chat_keys(self) -> set[str]:
+        keys = {str(item).strip().lower() for item in self.telegram_allowed_chat_ids if str(item).strip()}
+        if self.telegram_channel_id:
+            keys.add(str(self.telegram_channel_id).strip().lower())
+        keys.update(str(item) for item in self.telegram_admin_ids)
+        return keys
 
     @property
     def is_sqlite(self) -> bool:
