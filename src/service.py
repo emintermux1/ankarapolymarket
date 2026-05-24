@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 from src.config import Settings
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.herbie_optional import unavailable_health as herbie_unavailable_health
 from src.data_sources.iem_asos import IEMASOSAdapter
+from src.data_sources.mgm_optional import unavailable_health as mgm_unavailable_health
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.schemas import (
@@ -37,6 +39,8 @@ class ForecastContext:
     taf: TAFNormalized | None
     model_bundle: ModelBundle | None
     market: MarketSnapshot | None
+    previous_analysis: ForecastAnalysis | None = None
+    previous_model_tmax_c: dict[str, float | None] | None = None
 
 
 class ForecastService:
@@ -66,6 +70,7 @@ class ForecastService:
             self._safe_models(target),
             self._safe_market(target),
         )
+        previous_model_tmax_c = self.repository.latest_model_tmax_by_target(target)
         if metar:
             self.repository.save_observation(metar)
         if taf:
@@ -82,8 +87,18 @@ class ForecastService:
             market=market,
             historical_weights=historical_weights,
         )
+        previous_prediction = self.repository.latest_prediction(target)
+        previous_analysis = ForecastAnalysis.model_validate(previous_prediction) if previous_prediction else None
         self.repository.save_forecast_analysis(analysis, report_label=report_label)
-        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market)
+        return ForecastContext(
+            analysis=analysis,
+            metar=metar,
+            taf=taf,
+            model_bundle=bundle,
+            market=market,
+            previous_analysis=previous_analysis,
+            previous_model_tmax_c=previous_model_tmax_c,
+        )
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
@@ -94,6 +109,8 @@ class ForecastService:
             model_bundle=ctx.model_bundle,
             market=ctx.market,
             report_label=report_label,
+            previous_analysis=ctx.previous_analysis,
+            previous_model_tmax_c=ctx.previous_model_tmax_c,
         )
         return report
 
@@ -111,10 +128,11 @@ class ForecastService:
 
     async def render_models(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
+        previous_model_tmax_c = self.repository.latest_model_tmax_by_target(target)
         bundle = await self._safe_models(target)
         if bundle:
             self.repository.save_model_bundle(bundle)
-        return self.renderer.models_report(bundle)
+        return self.renderer.models_report(bundle, previous_model_tmax_c)
 
     async def render_market(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
@@ -178,9 +196,10 @@ class ForecastService:
             self.iem.health(),
             self.wunderground.health(),
         )
-        for item in health:
+        optional_health = [mgm_unavailable_health(), herbie_unavailable_health()]
+        for item in [*health, *optional_health]:
             self.repository.save_source_health(item)
-        return list(health)
+        return [*health, *optional_health]
 
     async def _safe_metar(self) -> METARNormalized | None:
         try:

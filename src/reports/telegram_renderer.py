@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,8 @@ class TelegramReportRenderer:
         model_bundle: ModelBundle | None,
         market: MarketSnapshot | None,
         report_label: str | None = None,
+        previous_analysis: ForecastAnalysis | None = None,
+        previous_model_tmax_c: Mapping[str, float | None] | None = None,
     ) -> str:
         report_time = analysis.generated_at.astimezone(self.tz)
         return "\n".join(
@@ -40,7 +43,9 @@ class TelegramReportRenderer:
                 "Lokasyon: Ankara Esenboğa / LTAC",
                 "",
                 "Özet:",
-                _bullet(f"Beklenen maksimum: {_fmt_c(analysis.final_tmax_c)}"),
+                _bullet(
+                    f"Beklenen maksimum: {_fmt_c_with_trend(analysis.final_tmax_c, previous_analysis.final_tmax_c if previous_analysis else None)}"
+                ),
                 _bullet(f"Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}"),
                 _bullet(f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})"),
                 _bullet(f"Sınır riski: {_boundary_risk(analysis)}"),
@@ -53,7 +58,7 @@ class TelegramReportRenderer:
                 *self._metar_lines(metar, include_raw=False),
                 "",
                 "Model tahminleri:",
-                *self._model_lines(model_bundle, analysis),
+                *self._model_lines(model_bundle, analysis, previous_model_tmax_c),
                 "",
                 "Hava dinamiği:",
                 *self._dynamic_lines(analysis),
@@ -103,10 +108,10 @@ class TelegramReportRenderer:
             ]
         )
 
-    def models_report(self, bundle: ModelBundle | None) -> str:
+    def models_report(self, bundle: ModelBundle | None, previous_model_tmax_c: Mapping[str, float | None] | None = None) -> str:
         if bundle is None:
             return "Model verisi yok."
-        return "\n".join(["MODEL KARŞILAŞTIRMA", *self._model_lines(bundle)])
+        return "\n".join(["MODEL KARŞILAŞTIRMA", *self._model_lines(bundle, previous_model_tmax_c=previous_model_tmax_c)])
 
     def market_report(self, analysis: ForecastAnalysis | None, market: MarketSnapshot | None) -> str:
         if market is None:
@@ -186,7 +191,12 @@ class TelegramReportRenderer:
             return [_bullet(f"Son METAR: {metar.raw_text}"), *lines]
         return lines
 
-    def _model_lines(self, bundle: ModelBundle | None, analysis: ForecastAnalysis | None = None) -> list[str]:
+    def _model_lines(
+        self,
+        bundle: ModelBundle | None,
+        analysis: ForecastAnalysis | None = None,
+        previous_model_tmax_c: Mapping[str, float | None] | None = None,
+    ) -> list[str]:
         if bundle is None:
             return [_bullet("ECMWF: veri yok"), _bullet("GFS: veri yok"), _bullet("ICON: veri yok"), _bullet("Model aralığı: veri yok")]
         lines = []
@@ -195,7 +205,8 @@ class TelegramReportRenderer:
             weight = ""
             if analysis and forecast.model in analysis.model_weights:
                 weight = f" (ağırlık %{analysis.model_weights[forecast.model] * 100:.0f})"
-            value = _fmt_c(forecast.tmax_c) if forecast.available else "veri yok"
+            previous_tmax = previous_model_tmax_c.get(forecast.model) if previous_model_tmax_c else None
+            value = _fmt_c_with_trend(forecast.tmax_c, previous_tmax) if forecast.available else "veri yok"
             reason = f" - {forecast.unavailable_reason}" if not forecast.available and forecast.unavailable_reason else ""
             lines.append(_bullet(f"{label}: {value}{weight}{reason}"))
         values = [forecast.tmax_c for forecast in bundle.available_forecasts if forecast.tmax_c is not None]
@@ -214,6 +225,7 @@ class TelegramReportRenderer:
         return [
             _bullet(f"Canlı sapma: {_adj(lookup.get('live_observation'))}"),
             _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
+            _bullet(f"Basınç/üst seviye: {_adj(lookup.get('synoptic_pressure'))}"),
             _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
             _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
         ]
@@ -416,6 +428,18 @@ def _fmt_range(low: float | None, high: float | None) -> str:
 
 def _fmt_c(value: float | None) -> str:
     return f"{value:.1f}°C" if value is not None else "veri yok"
+
+
+def _fmt_c_with_trend(value: float | None, previous: float | None) -> str:
+    text = _fmt_c(value)
+    if value is None or previous is None:
+        return text
+    delta = value - previous
+    if delta > 0.05:
+        return f"{text} 🔺 {delta:+.1f}°C"
+    if delta < -0.05:
+        return f"{text} 🔻 {delta:+.1f}°C"
+    return text
 
 
 def _fmt_num(value: float | int | None) -> str:
