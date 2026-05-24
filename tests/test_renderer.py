@@ -28,6 +28,8 @@ def test_renderer_marks_missing_market_without_fake_numbers() -> None:
     assert "veri yok" in text
     assert "unavailable" not in text
     assert "Yatırım tavsiyesi değildir" in text
+    assert "• Polymarket link" in text
+    assert "* Polymarket link" not in text
 
 
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
@@ -73,11 +75,11 @@ def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     text = renderer.daily_report(analysis=analysis, metar=None, taf=None, model_bundle=None, market=market)
 
     assert "Sınır riski: YÜKSEK" in text
-    assert "* 20°C: 2.1¢, fair 16.1%, edge +14.0 pp" in text
-    assert "* Önerilen bracket: BET YOK" in text
-    assert "* En iyi aday (işlem yok): 20°C" in text
-    assert "* Beklenen EV: gösterilmiyor (SKIP)" in text
-    assert "* Beklenen EV: $" not in text
+    assert "• 20°C: 2.1¢, fair 16.1%, edge +14.0 pp" in text
+    assert "• Önerilen bracket: BET YOK" in text
+    assert "• En iyi aday (işlem yok): 20°C" in text
+    assert "• Beklenen EV: gösterilmiyor (SKIP)" in text
+    assert "• Beklenen EV: $" not in text
 
 
 def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from zoneinfo import ZoneInfo
 
 from src.config import Settings
@@ -31,11 +31,6 @@ class TelegramReportRenderer:
         report_label: str | None = None,
     ) -> str:
         report_time = analysis.generated_at.astimezone(self.tz)
-        market_lines = self._market_lines(analysis, market)
-        model_lines = self._model_lines(model_bundle, analysis)
-        dynamic_lines = self._dynamic_lines(analysis)
-        data_lines = self._data_quality_lines(analysis.target_date, metar, taf, model_bundle, market)
-        bullets = "\n".join(f"* {bullet}" for bullet in analysis.rationale_bullets) or "Veri eksik; gerekçe üretilemedi."
         return "\n".join(
             [
                 _report_title(report_label),
@@ -45,29 +40,29 @@ class TelegramReportRenderer:
                 "Lokasyon: Ankara Esenboğa / LTAC",
                 "",
                 "Özet:",
-                f"* Beklenen maksimum: {_fmt_c(analysis.final_tmax_c)}",
-                f"* Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}",
-                f"* Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})",
-                f"* Sınır riski: {_boundary_risk(analysis)}",
-                f"* Karar: {analysis.verdict}",
+                _bullet(f"Beklenen maksimum: {_fmt_c(analysis.final_tmax_c)}"),
+                _bullet(f"Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}"),
+                _bullet(f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})"),
+                _bullet(f"Sınır riski: {_boundary_risk(analysis)}"),
+                _bullet(f"Karar: {analysis.verdict}"),
                 "",
                 "Veri kontrolü:",
-                *data_lines,
+                *self._data_quality_lines(analysis.target_date, metar, taf, model_bundle, market),
                 "",
                 "Canlı gözlem:",
                 *self._metar_lines(metar, include_raw=False),
                 "",
                 "Model tahminleri:",
-                *model_lines,
+                *self._model_lines(model_bundle, analysis),
                 "",
                 "Hava dinamiği:",
-                *dynamic_lines,
+                *self._dynamic_lines(analysis),
                 "",
                 "Neden bu tahmin?",
-                bullets,
+                *self._rationale_lines(analysis),
                 "",
                 "Market fiyatlaması:",
-                *market_lines,
+                *self._market_lines(analysis, market),
                 "",
                 "MANUEL BET ÖZETİ ($100 sabit)",
                 *self._manual_bet_lines(analysis, market),
@@ -90,8 +85,10 @@ class TelegramReportRenderer:
         periods = []
         for period in taf.periods[:5]:
             periods.append(
-                f"* {period.time_from.astimezone(self.tz):%d %H:%M}-{period.time_to.astimezone(self.tz):%d %H:%M}: "
-                f"{period.change or 'BASE'} {period.weather or ''} rüzgâr {period.wind_direction_deg or 'VRB'}°/{period.wind_speed_kt or 0:.0f} kt"
+                _bullet(
+                    f"{period.time_from.astimezone(self.tz):%d %H:%M}-{period.time_to.astimezone(self.tz):%d %H:%M}: "
+                    f"{period.change or 'BASE'} {period.weather or ''} rüzgâr {period.wind_direction_deg or 'VRB'}°/{period.wind_speed_kt or 0:.0f} kt"
+                )
             )
         return "\n".join(
             [
@@ -122,7 +119,7 @@ class TelegramReportRenderer:
         if analysis:
             lines.append(f"Edge: {analysis.edge_summary}")
         for outcome in market.outcomes:
-            lines.append(f"* {outcome.bracket}: {_fmt_pct(outcome.implied_probability)} makas {_fmt_num(outcome.spread)}")
+            lines.append(_bullet(f"{outcome.bracket}: {_fmt_pct(outcome.implied_probability)} makas {_fmt_num(outcome.spread)}"))
         lines.append("Not: Yatırım tavsiyesi değildir.")
         return "\n".join(lines)
 
@@ -133,7 +130,7 @@ class TelegramReportRenderer:
         for item in health:
             suffix = f" ({item.message})" if item.message else ""
             latency = f", {item.latency_ms:.0f} ms" if item.latency_ms is not None else ""
-            lines.append(f"* {item.source}: {_source_state_label(item.state.value)}{latency}{suffix}")
+            lines.append(_bullet(f"{item.source}: {_source_state_label(item.state.value)}{latency}{suffix}"))
         return "\n".join(lines)
 
     def backtest_report(self, rows: list[dict]) -> str:
@@ -142,7 +139,7 @@ class TelegramReportRenderer:
         lines = ["BACKTEST ÖZETİ"]
         for row in rows[:10]:
             lines.append(
-                f"* {row['model']} {row['window_days']}g: MAE {_fmt_num(row['mae'])}, bias {_fmt_num(row['bias'])}, kalibrasyon {_fmt_num(row['calibration_score'])}"
+                _bullet(f"{row['model']} {row['window_days']}g: MAE {_fmt_num(row['mae'])}, bias {_fmt_num(row['bias'])}, kalibrasyon {_fmt_num(row['calibration_score'])}")
             )
         return "\n".join(lines)
 
@@ -162,33 +159,33 @@ class TelegramReportRenderer:
     def _metar_lines(self, metar: METARNormalized | None, *, include_raw: bool = True) -> list[str]:
         if metar is None:
             return [
-                "* Son METAR: veri yok",
-                "* Gözlem zamanı: veri yok",
-                "* Sıcaklık: veri yok",
-                "* Çiğ noktası: veri yok",
-                "* Nem: veri yok",
-                "* Rüzgâr: veri yok",
-                "* Basınç: veri yok",
-                "* Bulut: veri yok",
-                "* Görüş: veri yok",
+                _bullet("Son METAR: veri yok"),
+                _bullet("Gözlem zamanı: veri yok"),
+                _bullet("Sıcaklık: veri yok"),
+                _bullet("Çiğ noktası: veri yok"),
+                _bullet("Nem: veri yok"),
+                _bullet("Rüzgâr: veri yok"),
+                _bullet("Basınç: veri yok"),
+                _bullet("Bulut: veri yok"),
+                _bullet("Görüş: veri yok"),
             ]
         lines = [
-            f"* Gözlem zamanı: {metar.observation_time:%Y-%m-%d %H:%M UTC}",
-            f"* Sıcaklık: {metar.temperature_c:.1f}°C",
-            f"* Çiğ noktası: {metar.dew_point_c:.1f}°C",
-            f"* Nem: %{metar.relative_humidity if metar.relative_humidity is not None else 'veri yok'}",
-            f"* Rüzgâr: {metar.wind_direction_deg if metar.wind_direction_deg is not None else 'VRB'}° / {metar.wind_speed_kt:.0f} KT",
-            f"* Basınç: {_fmt_num(metar.pressure_hpa)} hPa",
-            f"* Bulut: {_format_clouds(metar.cloud_layers)}",
-            f"* Görüş: {metar.visibility_m if metar.visibility_m is not None else 'veri yok'}m",
+            _bullet(f"Gözlem zamanı: {metar.observation_time:%Y-%m-%d %H:%M UTC}"),
+            _bullet(f"Sıcaklık: {metar.temperature_c:.1f}°C"),
+            _bullet(f"Çiğ noktası: {metar.dew_point_c:.1f}°C"),
+            _bullet(f"Nem: %{metar.relative_humidity if metar.relative_humidity is not None else 'veri yok'}"),
+            _bullet(f"Rüzgâr: {metar.wind_direction_deg if metar.wind_direction_deg is not None else 'VRB'}° / {metar.wind_speed_kt:.0f} KT"),
+            _bullet(f"Basınç: {_fmt_num(metar.pressure_hpa)} hPa"),
+            _bullet(f"Bulut: {_format_clouds(metar.cloud_layers)}"),
+            _bullet(f"Görüş: {metar.visibility_m if metar.visibility_m is not None else 'veri yok'}m"),
         ]
         if include_raw:
-            return [f"* Son METAR: {metar.raw_text}", *lines]
+            return [_bullet(f"Son METAR: {metar.raw_text}"), *lines]
         return lines
 
     def _model_lines(self, bundle: ModelBundle | None, analysis: ForecastAnalysis | None = None) -> list[str]:
         if bundle is None:
-            return ["* ECMWF: veri yok", "* GFS: veri yok", "* ICON: veri yok", "* Model aralığı: veri yok"]
+            return [_bullet("ECMWF: veri yok"), _bullet("GFS: veri yok"), _bullet("ICON: veri yok"), _bullet("Model aralığı: veri yok")]
         lines = []
         for forecast in bundle.forecasts:
             label = _display_model_name(forecast.model)
@@ -197,48 +194,53 @@ class TelegramReportRenderer:
                 weight = f" (ağırlık %{analysis.model_weights[forecast.model] * 100:.0f})"
             value = _fmt_c(forecast.tmax_c) if forecast.available else "veri yok"
             reason = f" - {forecast.unavailable_reason}" if not forecast.available and forecast.unavailable_reason else ""
-            lines.append(f"* {label}: {value}{weight}{reason}")
+            lines.append(_bullet(f"{label}: {value}{weight}{reason}"))
         values = [forecast.tmax_c for forecast in bundle.available_forecasts if forecast.tmax_c is not None]
         if values:
-            lines.append(f"* Model aralığı: {min(values):.1f}°C - {max(values):.1f}°C")
+            lines.append(_bullet(f"Model aralığı: {min(values):.1f}°C - {max(values):.1f}°C"))
         else:
-            lines.append("* Model aralığı: veri yok")
+            lines.append(_bullet("Model aralığı: veri yok"))
         if analysis and analysis.ensemble_sigma_c is not None:
-            lines.append(f"* Ensemble belirsizliği: ±{analysis.ensemble_sigma_c:.1f}°C")
+            lines.append(_bullet(f"Ensemble belirsizliği: ±{analysis.ensemble_sigma_c:.1f}°C"))
         if analysis and analysis.probability_sigma_c is not None:
-            lines.append(f"* Olasılık hesabı belirsizliği: ±{analysis.probability_sigma_c:.1f}°C")
+            lines.append(_bullet(f"Olasılık hesabı belirsizliği: ±{analysis.probability_sigma_c:.1f}°C"))
         return lines
 
     def _dynamic_lines(self, analysis: ForecastAnalysis) -> list[str]:
         lookup = {item.name: item for item in analysis.adjustments}
         return [
-            f"* Canlı sapma: {_adj(lookup.get('live_observation'))}",
-            f"* Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}",
-            f"* Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}",
-            f"* Yağış/zemin: {_adj(lookup.get('rain_soil'))}",
+            _bullet(f"Canlı sapma: {_adj(lookup.get('live_observation'))}"),
+            _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
+            _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
+            _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
         ]
+
+    def _rationale_lines(self, analysis: ForecastAnalysis) -> list[str]:
+        if not analysis.rationale_bullets:
+            return [_bullet("Veri eksik; gerekçe üretilemedi.")]
+        return [_bullet(bullet) for bullet in analysis.rationale_bullets]
 
     def _market_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
         if market is None:
             return [
-                "* Polymarket link: ilgili market bulunamadı",
-                "* Piyasa fiyatları: veri yok",
-                "* Hacim: veri yok",
-                "* Spread: veri yok",
-                "* Likidite: veri yok",
-                "* Edge: Edge yok",
-                "* Not: Yatırım tavsiyesi değildir.",
+                _bullet("Polymarket link: ilgili market bulunamadı"),
+                _bullet("Piyasa fiyatları: veri yok"),
+                _bullet("Hacim: veri yok"),
+                _bullet("Spread: veri yok"),
+                _bullet("Likidite: veri yok"),
+                _bullet("Edge: Edge yok"),
+                _bullet("Not: Yatırım tavsiyesi değildir."),
             ]
         if not market.valid_for_target:
             return [
-                f"* Polymarket link: {market.link}",
-                f"* Durum: hedefle uyumsuz ({market.validation_message or 'neden yok'})",
-                "* Piyasa fiyatları: veri yok",
-                "* Hacim: veri yok",
-                "* Spread: veri yok",
-                "* Likidite: veri yok",
-                "* Edge: Edge yok",
-                "* Not: Yatırım tavsiyesi değildir.",
+                _bullet(f"Polymarket link: {market.link}"),
+                _bullet(f"Durum: hedefle uyumsuz ({market.validation_message or 'neden yok'})"),
+                _bullet("Piyasa fiyatları: veri yok"),
+                _bullet("Hacim: veri yok"),
+                _bullet("Spread: veri yok"),
+                _bullet("Likidite: veri yok"),
+                _bullet("Edge: Edge yok"),
+                _bullet("Not: Yatırım tavsiyesi değildir."),
             ]
         ranked_outcomes = sorted(
             market.outcomes,
@@ -247,11 +249,11 @@ class TelegramReportRenderer:
         )
         spreads = [outcome.spread for outcome in market.outcomes if outcome.spread is not None]
         lines = [
-            f"* Polymarket link: {market.link}",
-            f"* Hacim: ${_fmt_num(market.volume)}",
-            f"* Likidite: ${_fmt_num(market.liquidity)}",
-            f"* En geniş spread: {_fmt_num(max(spreads) if spreads else None)}",
-            "* En güçlü piyasa fiyatları:",
+            _bullet(f"Polymarket link: {market.link}"),
+            _bullet(f"Hacim: ${_fmt_num(market.volume)}"),
+            _bullet(f"Likidite: ${_fmt_num(market.liquidity)}"),
+            _bullet(f"En geniş spread: {_fmt_num(max(spreads) if spreads else None)}"),
+            _bullet("En güçlü piyasa fiyatları:"),
         ]
         for outcome in ranked_outcomes[:3]:
             implied = outcome.implied_probability
@@ -262,11 +264,11 @@ class TelegramReportRenderer:
                 details.append(f"fair {_fmt_pct(fair)}")
             if edge is not None:
                 details.append(f"edge {_fmt_pp(edge)}")
-            lines.append(f"* {outcome.bracket}: {', '.join(details)}")
+            lines.append(_bullet(f"{outcome.bracket}: {', '.join(details)}"))
         if len(ranked_outcomes) > 3:
-            lines.append(f"* Diğer outcome sayısı: {len(ranked_outcomes) - 3}")
-        lines.append(f"* Edge: {analysis.edge_summary}")
-        lines.append("* Not: Yatırım tavsiyesi değildir.")
+            lines.append(_bullet(f"Diğer outcome sayısı: {len(ranked_outcomes) - 3}"))
+        lines.append(_bullet(f"Edge: {analysis.edge_summary}"))
+        lines.append(_bullet("Not: Yatırım tavsiyesi değildir."))
         return lines
 
     def _manual_bet_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
@@ -274,10 +276,10 @@ class TelegramReportRenderer:
         boundary = _boundary_risk(analysis)
         if candidate is None:
             return [
-                "* Önerilen bracket: BET YOK",
-                "* Karar: SKIP",
-                "* Sebep: geçerli fiyat/fair probability ile pozitif edge bulunamadı.",
-                "* Not: Yatırım tavsiyesi değildir; manuel karar sende.",
+                _bullet("Önerilen bracket: BET YOK"),
+                _bullet("Karar: SKIP"),
+                _bullet("Sebep: geçerli fiyat/fair probability ile pozitif edge bulunamadı."),
+                _bullet("Not: Yatırım tavsiyesi değildir; manuel karar sende."),
             ]
 
         edge, bracket, fair, implied = candidate
@@ -291,20 +293,20 @@ class TelegramReportRenderer:
         should_bet = not reasons
 
         lines = [
-            f"* Önerilen bracket: {bracket if should_bet else 'BET YOK'}",
-            f"* En iyi aday{'' if should_bet else ' (işlem yok)'}: {bracket}",
-            f"* Market fiyat: {_fmt_cents(implied)}",
-            f"* Bot fair prob: {_fmt_pct(fair)}",
-            f"* Edge: {_fmt_pp(edge)}",
-            f"* Sınır riski: {boundary}",
+            _bullet(f"Önerilen bracket: {bracket if should_bet else 'BET YOK'}"),
+            _bullet(f"En iyi aday{'' if should_bet else ' (işlem yok)'}: {bracket}"),
+            _bullet(f"Market fiyat: {_fmt_cents(implied)}"),
+            _bullet(f"Bot fair prob: {_fmt_pct(fair)}"),
+            _bullet(f"Edge: {_fmt_pp(edge)}"),
+            _bullet(f"Sınır riski: {boundary}"),
         ]
         if should_bet:
-            lines.append(f"* Beklenen EV: ${_fmt_num(_expected_profit_usd(100.0, fair, implied))}")
-            lines.append("* Karar: MANUEL ONAY GEREKİR")
+            lines.append(_bullet(f"Beklenen EV: ${_fmt_num(_expected_profit_usd(100.0, fair, implied))}"))
+            lines.append(_bullet("Karar: MANUEL ONAY GEREKİR"))
         else:
-            lines.append("* Beklenen EV: gösterilmiyor (SKIP)")
-            lines.append(f"* Karar: SKIP ({'; '.join(reasons)})")
-        lines.append("* Not: Yatırım tavsiyesi değildir; manuel karar sende.")
+            lines.append(_bullet("Beklenen EV: gösterilmiyor (SKIP)"))
+            lines.append(_bullet(f"Karar: SKIP ({'; '.join(reasons)})"))
+        lines.append(_bullet("Not: Yatırım tavsiyesi değildir; manuel karar sende."))
         return lines
 
     def _data_quality_lines(
@@ -317,35 +319,39 @@ class TelegramReportRenderer:
     ) -> list[str]:
         lines: list[str] = []
         if metar is None:
-            lines.append("* METAR: veri yok")
+            lines.append(_bullet("METAR: veri yok"))
         elif metar.observation_time.astimezone(self.tz).date() != target_date:
             local_date = metar.observation_time.astimezone(self.tz).date()
-            lines.append(f"* METAR: güncel, fakat hedef gün değil ({local_date.isoformat()})")
+            lines.append(_bullet(f"METAR: güncel, fakat hedef gün değil ({local_date.isoformat()})"))
         elif metar.is_stale:
-            lines.append(f"* METAR: eski ({metar.age_minutes:.0f} dk)")
+            lines.append(_bullet(f"METAR: eski ({metar.age_minutes:.0f} dk)"))
         else:
-            lines.append(f"* METAR: güncel ({metar.age_minutes:.0f} dk)")
+            lines.append(_bullet(f"METAR: güncel ({metar.age_minutes:.0f} dk)"))
 
         if model_bundle is None:
-            lines.append("* Modeller: veri yok")
+            lines.append(_bullet("Modeller: veri yok"))
         else:
             available = len(model_bundle.available_forecasts)
             total = len(model_bundle.forecasts)
-            lines.append(f"* Modeller: {available}/{total} kullanılabilir")
+            lines.append(_bullet(f"Modeller: {available}/{total} kullanılabilir"))
 
         if taf is None:
-            lines.append("* TAF: veri yok")
+            lines.append(_bullet("TAF: veri yok"))
         else:
             risk = "yağış/CB riski var" if taf.rain_or_storm_risk else "belirgin yağış/CB riski yok"
-            lines.append(f"* TAF: var, {risk}")
+            lines.append(_bullet(f"TAF: var, {risk}"))
 
         if market is None:
-            lines.append("* Polymarket: ilgili market bulunamadı")
+            lines.append(_bullet("Polymarket: ilgili market bulunamadı"))
         elif not market.valid_for_target:
-            lines.append(f"* Polymarket: hedefle uyumsuz ({market.validation_message or 'neden yok'})")
+            lines.append(_bullet(f"Polymarket: hedefle uyumsuz ({market.validation_message or 'neden yok'})"))
         else:
-            lines.append("* Polymarket: hedef market doğrulandı")
+            lines.append(_bullet("Polymarket: hedef market doğrulandı"))
         return lines
+
+
+def _bullet(text: str) -> str:
+    return f"• {text}"
 
 
 def _report_title(label: str | None) -> str:
