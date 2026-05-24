@@ -78,6 +78,7 @@ class ForecastService:
         if bundle:
             self.repository.save_model_bundle(bundle)
         self.repository.save_market_snapshot(market)
+        recent_observations = self.repository.recent_observations(self.settings.ltac_icao)
         historical_weights = self.repository.latest_model_weights(self.settings.openmeteo_models)
         analysis = self.engine.run(
             target_date=target,
@@ -86,6 +87,7 @@ class ForecastService:
             model_bundle=bundle or ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target),
             market=market,
             historical_weights=historical_weights,
+            recent_observations=recent_observations,
         )
         previous_prediction = self.repository.latest_prediction(target)
         previous_analysis = ForecastAnalysis.model_validate(previous_prediction) if previous_prediction else None
@@ -133,6 +135,10 @@ class ForecastService:
         if bundle:
             self.repository.save_model_bundle(bundle)
         return self.renderer.models_report(bundle, previous_model_tmax_c)
+
+    async def render_nowcasting(self, target_date: date | None = None) -> str:
+        ctx = await self.build_forecast_context(target_date=target_date, report_label="nowcast")
+        return self.renderer.nowcasting_report(ctx.analysis.nowcasting_signals)
 
     async def render_market(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()

@@ -13,6 +13,7 @@ from src.data_sources.schemas import (
     ModelBundle,
     ModelForecast,
     ModelHourlyPoint,
+    NowcastingSignal,
     TAFForecastPeriod,
     TAFNormalized,
 )
@@ -114,6 +115,14 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
             ForecastAdjustment(name="synoptic_pressure", value_c=-0.2, summary="06-09→12-15 basınç trendi -2.0 hPa", inputs={}),
             ForecastAdjustment(name="ltac_microclimate", value_c=0.0, summary="placeholder", inputs={}),
         ],
+        nowcasting_signals=[
+            NowcastingSignal(
+                name="peak_window",
+                label="Peak Window",
+                state="15:20 - 16:10",
+                summary="bugünkü maksimum için model tepe penceresi 15:20 - 16:10",
+            )
+        ],
     )
     text = renderer.daily_report(
         analysis=analysis,
@@ -126,6 +135,8 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     assert text.startswith("ANKARA ESENBOĞA ÖĞLE GÜNCELLEMESİ")
     assert "Canlı sapma: METAR hedef gün değil" in text
     assert "Basınç/üst seviye: 06-09→12-15 basınç trendi -2.0 hPa" in text
+    assert "Esenboğa nowcasting:" in text
+    assert "Peak Window: 15:20 - 16:10" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
 

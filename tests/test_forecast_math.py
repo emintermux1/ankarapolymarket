@@ -17,6 +17,7 @@ from src.data_sources.schemas import (
 from src.forecast.confidence import calculate_confidence
 from src.forecast.engine import _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
+from src.forecast.nowcasting import calculate_nowcasting_signals
 from src.forecast.synoptic_pressure import calculate_synoptic_pressure_adjustment
 
 
@@ -170,7 +171,6 @@ def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:
     assert risks["critical"] == "Belirgin kritik belirsizlik sinyali yok"
     assert "Bulut kırılması" not in risks["upward"]
 
-
 def test_risks_include_synoptic_pressure_signal() -> None:
     risks = _risks(
         [
@@ -187,3 +187,64 @@ def test_risks_include_synoptic_pressure_signal() -> None:
 
     assert "düşen basınç/serin üst seviye" in risks["downward"]
     assert "düşen basınç + CAPE konveksiyon riski" in risks["critical"]
+
+
+def test_nowcasting_flags_temperature_momentum_from_recent_metars() -> None:
+    now = datetime.now(timezone.utc)
+    observations = [
+        _metar(now.replace(minute=0, second=0, microsecond=0), 17.4),
+        _metar(now.replace(minute=30, second=0, microsecond=0), 18.6),
+        _metar(now.replace(minute=59, second=0, microsecond=0), 20.0),
+    ]
+
+    signals = calculate_nowcasting_signals(
+        metar=observations[-1],
+        taf=None,
+        forecasts=[],
+        recent_observations=observations,
+        target_date=now.date(),
+        report_timezone="Europe/Istanbul",
+        ltac_elevation_m=953,
+    )
+    lookup = {signal.name: signal for signal in signals}
+
+    assert lookup["temperature_momentum"].state == "Güçlü momentum"
+    assert lookup["temperature_momentum"].inputs["temperature_delta_c"] >= 2.0
+    assert lookup["temperature_spike"].state in {"Orta", "Yüksek"}
+
+
+def test_nowcasting_derives_peak_window_from_model_hourlies() -> None:
+    target = date(2026, 5, 24)
+    hourly = [
+        ModelHourlyPoint(time=datetime(2026, 5, 24, hour, tzinfo=timezone.utc), temperature_2m_c=temp)
+        for hour, temp in ((13, 22.0), (14, 24.0), (15, 26.0), (16, 27.0), (17, 26.0), (18, 24.0))
+    ]
+    forecasts = [
+        ModelForecast(model="ecmwf_ifs025", available=True, target_date=target, hourly=hourly, tmax_c=27.0),
+        ModelForecast(model="gfs_seamless", available=True, target_date=target, hourly=hourly, tmax_c=27.0),
+    ]
+
+    signals = calculate_nowcasting_signals(
+        metar=None,
+        taf=None,
+        forecasts=forecasts,
+        recent_observations=[],
+        target_date=target,
+        report_timezone="UTC",
+        ltac_elevation_m=953,
+    )
+    peak = next(signal for signal in signals if signal.name == "peak_window")
+
+    assert peak.state == "15:40 - 16:20"
+    assert peak.inputs["model_peak_times"] == {"ecmwf_ifs025": "16:00", "gfs_seamless": "16:00"}
+
+
+def _metar(observation_time: datetime, temperature_c: float) -> METARNormalized:
+    return METARNormalized(
+        fetch_timestamp=observation_time,
+        observation_time=observation_time,
+        temperature_c=temperature_c,
+        dew_point_c=temperature_c - 8.0,
+        wind_speed_kt=4,
+        raw_text="METAR LTAC TEST",
+    )

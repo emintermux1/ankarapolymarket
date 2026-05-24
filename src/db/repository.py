@@ -236,6 +236,34 @@ class Repository:
             )
         return result
 
+    def recent_observations(self, station: str = "LTAC", limit: int = 12) -> list[METARNormalized]:
+        with self.session_factory() as session:
+            rows = session.scalars(
+                select(Observation)
+                .where(Observation.station == station)
+                .order_by(desc(Observation.observation_time))
+                .limit(limit)
+            ).all()
+        return [
+            METARNormalized(
+                fetch_timestamp=row.fetch_timestamp,
+                observation_time=row.observation_time,
+                station=row.station,
+                temperature_c=row.temperature_c,
+                dew_point_c=row.dew_point_c,
+                relative_humidity=row.relative_humidity,
+                wind_direction_deg=row.wind_direction_deg,
+                wind_speed_kt=row.wind_speed_kt,
+                wind_gust_kt=row.wind_gust_kt,
+                pressure_hpa=row.pressure_hpa,
+                visibility_m=row.visibility_m,
+                cloud_layers=row.cloud_layers,
+                raw_text=row.raw_metar,
+                raw_json=row.raw_json,
+            )
+            for row in reversed(rows)
+        ]
+
     def latest_model_weights(self, models: list[str]) -> dict[str, dict[str, float | None]]:
         weights: dict[str, dict[str, float | None]] = {}
         with self.session_factory() as session:

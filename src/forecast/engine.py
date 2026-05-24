@@ -25,6 +25,7 @@ from src.forecast.ensemble import (
     weighted_model_tmax,
 )
 from src.forecast.live_adjustment import calculate_live_observation_adjustment
+from src.forecast.nowcasting import calculate_nowcasting_signals
 from src.forecast.soil_rain import calculate_rain_soil_adjustment
 from src.forecast.synoptic_pressure import calculate_synoptic_pressure_adjustment
 
@@ -42,6 +43,7 @@ class LTACForecastEngine:
         model_bundle: ModelBundle,
         market: MarketSnapshot | None,
         historical_weights: dict[str, dict[str, float | None]],
+        recent_observations: list[METARNormalized] | None = None,
     ) -> ForecastAnalysis:
         forecasts = model_bundle.forecasts
         available = model_bundle.available_forecasts
@@ -90,6 +92,15 @@ class LTACForecastEngine:
         fair_probabilities = _fair_probabilities(final, prob_sigma, market)
         edge_summary = _edge_summary(fair_probabilities, market)
         main_range_half_width = max(0.5, prob_sigma)
+        nowcasting_signals = calculate_nowcasting_signals(
+            metar=metar,
+            taf=taf,
+            forecasts=forecasts,
+            recent_observations=recent_observations,
+            target_date=target_date,
+            report_timezone=self.settings.report_timezone,
+            ltac_elevation_m=self.settings.ltac_elevation_m,
+        )
         return ForecastAnalysis(
             target_date=target_date,
             generated_at=datetime.now(timezone.utc),
@@ -111,6 +122,7 @@ class LTACForecastEngine:
             edge_summary=edge_summary,
             rationale_bullets=_rationale(metar, taf, forecasts, adjustments, spread, ens_sigma, prob_sigma),
             risks=_risks(adjustments, prob_sigma, taf),
+            nowcasting_signals=nowcasting_signals,
         )
 
     def _adjustments(
