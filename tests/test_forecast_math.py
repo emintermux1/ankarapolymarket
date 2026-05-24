@@ -5,10 +5,26 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.data_sources.schemas import EnsembleForecast, ForecastAdjustment, METARNormalized, MarketOutcome, MarketSnapshot, ModelForecast
+from src.data_sources.schemas import (
+    EnsembleForecast,
+    ForecastAdjustment,
+    METARNormalized,
+    MarketOutcome,
+    MarketSnapshot,
+    ModelForecast,
+    ModelHourlyPoint,
+    RadarMotionSignal,
+)
 from src.forecast.confidence import calculate_confidence
 from src.forecast.engine import _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
+from src.forecast.local_effects import (
+    calculate_airport_heat_island_adjustment,
+    calculate_metar_anomaly_adjustment,
+    calculate_radar_motion_adjustment,
+    calculate_runway_radiation_adjustment,
+    calculate_satellite_cloud_cooling_adjustment,
+)
 
 
 def test_metar_rejects_dewpoint_above_temperature() -> None:
@@ -133,3 +149,94 @@ def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:
     assert risks["downward"] == "Belirgin aşağı risk sinyali yok"
     assert risks["critical"] == "Belirgin kritik belirsizlik sinyali yok"
     assert "Bulut kırılması" not in risks["upward"]
+
+
+def test_radar_motion_adjustment_cools_approaching_cells() -> None:
+    radar = RadarMotionSignal(
+        fetch_timestamp=datetime.now(timezone.utc),
+        frame_time=datetime(2026, 5, 24, 9, tzinfo=timezone.utc),
+        center_intensity=1.0,
+        upwind_intensity=12.0,
+        downwind_intensity=0.0,
+        max_nearby_intensity=12.0,
+        motion="approaching",
+        confidence=0.8,
+    )
+
+    adjustment = calculate_radar_motion_adjustment(radar, date(2026, 5, 24), "UTC")
+
+    assert adjustment.value_c == -0.45
+    assert adjustment.inputs["motion"] == "approaching"
+    assert "yaklaşıyor" in adjustment.summary
+
+
+def test_satellite_cloud_cooling_detects_growing_midday_cloud_and_low_radiation() -> None:
+    forecast = ModelForecast(
+        model="test",
+        available=True,
+        target_date=date(2026, 5, 24),
+        tmax_c=20.0,
+        hourly=[
+            ModelHourlyPoint(time=datetime(2026, 5, 24, 9, tzinfo=timezone.utc), cloud_cover_pct=35, shortwave_radiation_wm2=650),
+            ModelHourlyPoint(time=datetime(2026, 5, 24, 12, tzinfo=timezone.utc), cloud_cover_pct=90, cloud_cover_low_pct=80, shortwave_radiation_wm2=420),
+            ModelHourlyPoint(time=datetime(2026, 5, 24, 13, tzinfo=timezone.utc), cloud_cover_pct=85, cloud_cover_mid_pct=75, shortwave_radiation_wm2=450),
+        ],
+    )
+
+    adjustment = calculate_satellite_cloud_cooling_adjustment([forecast])
+
+    assert adjustment.value_c < -0.4
+    assert adjustment.inputs["cloud_growth_pp"] > 25
+    assert "bulut artışı" in adjustment.summary
+
+
+def test_metar_anomaly_flags_large_model_departure_without_temperature_offset() -> None:
+    observed = datetime.now(timezone.utc)
+    metar = METARNormalized(
+        fetch_timestamp=observed,
+        observation_time=observed,
+        temperature_c=29,
+        dew_point_c=7,
+        relative_humidity=24,
+        wind_speed_kt=5,
+        raw_text="METAR LTAC TEST",
+    )
+    forecast = ModelForecast(
+        model="test",
+        available=True,
+        target_date=observed.date(),
+        tmax_c=22.0,
+        hourly=[
+            ModelHourlyPoint(time=observed.replace(minute=0, second=0, microsecond=0), temperature_2m_c=22.0),
+        ],
+    )
+
+    adjustment = calculate_metar_anomaly_adjustment(metar, [forecast], observed.date(), "UTC")
+
+    assert adjustment.value_c == 0.0
+    assert adjustment.inputs["severity"] == 0.9
+    assert "ayrışma" in adjustment.summary
+
+
+def test_airport_heat_island_and_runway_radiation_raise_clear_calm_surface() -> None:
+    forecast = ModelForecast(
+        model="test",
+        available=True,
+        target_date=date(2026, 5, 24),
+        tmax_c=24.0,
+        hourly=[
+            ModelHourlyPoint(
+                time=datetime(2026, 5, 24, 12, tzinfo=timezone.utc),
+                cloud_cover_low_pct=10,
+                shortwave_radiation_wm2=790,
+                wind_speed_10m_kt=4,
+                relative_humidity_pct=25,
+            )
+        ],
+    )
+
+    heat = calculate_airport_heat_island_adjustment(None, [forecast])
+    runway = calculate_runway_radiation_adjustment(None, [forecast])
+
+    assert heat.value_c == 0.3
+    assert runway.value_c == 0.33

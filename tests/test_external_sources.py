@@ -7,6 +7,7 @@ import pytest
 from src.config import Settings
 from src.data_sources.base import SourceError
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.rainviewer import RainViewerRadarAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
 
@@ -77,3 +78,47 @@ async def test_tomorrow_forecast_maps_cloud_ceiling_and_radiation(monkeypatch) -
     assert forecast.hourly[0].cloud_base_m == 1200
     assert forecast.hourly[0].cloud_ceiling_m == 2400
     assert forecast.hourly[0].shortwave_radiation_wm2 == 520
+
+
+@pytest.mark.asyncio
+async def test_rainviewer_radar_motion_samples_upwind_tile(monkeypatch) -> None:
+    adapter = RainViewerRadarAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+    calls = []
+
+    async def fake_request_json(url: str, **kwargs):
+        return {
+            "host": "https://tilecache.rainviewer.com",
+            "radar": {
+                "past": [
+                    {"time": 1_779_600_000, "path": "/v2/radar/1779600000"},
+                    {"time": 1_779_600_600, "path": "/v2/radar/1779600600"},
+                ]
+            },
+        }
+
+    async def fake_request_bytes(url: str, **kwargs):
+        calls.append(url)
+        return _radar_png(west_alpha=0.55 if "1779600600" in url else 0.0)
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+    monkeypatch.setattr(adapter, "_request_bytes", fake_request_bytes)
+
+    signal = await adapter.get_radar_motion(wind_direction_deg=270)
+
+    assert len(calls) == 2
+    assert "/40.1281/32.9951/" in calls[-1]
+    assert signal.motion == "approaching"
+    assert signal.upwind_intensity > signal.center_intensity
+
+
+def _radar_png(*, west_alpha: float) -> bytes:
+    from io import BytesIO
+
+    import matplotlib.image as mpimg
+    import numpy as np
+
+    image = np.zeros((256, 256, 4), dtype=float)
+    image[92:164, 18:92, 3] = west_alpha
+    buf = BytesIO()
+    mpimg.imsave(buf, image, format="png")
+    return buf.getvalue()

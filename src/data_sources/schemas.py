@@ -155,6 +155,21 @@ class ModelBundle(BaseModel):
         return [forecast for forecast in self.forecasts if forecast.available and forecast.tmax_c is not None]
 
 
+class RadarMotionSignal(BaseModel):
+    source: str = "RainViewer"
+    fetch_timestamp: datetime
+    frame_time: datetime | None = None
+    previous_frame_time: datetime | None = None
+    center_intensity: float | None = None
+    previous_center_intensity: float | None = None
+    upwind_intensity: float | None = None
+    downwind_intensity: float | None = None
+    max_nearby_intensity: float | None = None
+    motion: str = "unavailable"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    raw_json: dict[str, Any] = Field(default_factory=dict)
+
+
 class OrderBookLevel(BaseModel):
     price: float
     size: float

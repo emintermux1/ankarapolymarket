@@ -4,6 +4,7 @@ from .schemas import (
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
+    RadarMotionSignal,
     SourceHealth,
     TAFNormalized,
 )
@@ -14,7 +15,7 @@ __all__ = [
     "MarketSnapshot",
     "METARNormalized",
     "ModelBundle",
+    "RadarMotionSignal",
     "SourceHealth",
     "TAFNormalized",
 ]
-

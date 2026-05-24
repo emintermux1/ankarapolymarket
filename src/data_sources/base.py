@@ -63,6 +63,19 @@ class HttpSource:
 
         return await self._with_retries(do_request)
 
+    async def _request_bytes(self, url: str, **kwargs: object) -> bytes:
+        async def do_request() -> bytes:
+            async with httpx.AsyncClient(
+                timeout=self.settings.http_timeout_seconds,
+                headers={"User-Agent": "ankara-ltac-weather-bot/0.1"},
+                follow_redirects=True,
+            ) as client:
+                response = await client.get(url, **kwargs)
+                response.raise_for_status()
+                return response.content
+
+        return await self._with_retries(do_request)
+
     async def _with_retries(self, fn: Callable[[], Awaitable[T]]) -> T:
         last_error: Exception | None = None
         for attempt in range(self.settings.http_retries + 1):

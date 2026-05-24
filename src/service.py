@@ -11,6 +11,7 @@ from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
+from src.data_sources.rainviewer import RainViewerRadarAdapter
 from src.data_sources.schemas import (
     ActualResult,
     ForecastAnalysis,
@@ -18,6 +19,7 @@ from src.data_sources.schemas import (
     METARNormalized,
     ModelBundle,
     ModelForecast,
+    RadarMotionSignal,
     SourceHealth,
     TAFNormalized,
 )
@@ -37,6 +39,7 @@ class ForecastContext:
     taf: TAFNormalized | None
     model_bundle: ModelBundle | None
     market: MarketSnapshot | None
+    radar: RadarMotionSignal | None = None
 
 
 class ForecastService:
@@ -49,6 +52,7 @@ class ForecastService:
         self.visualcrossing = VisualCrossingAdapter(settings)
         self.tomorrow = TomorrowIOAdapter(settings)
         self.polymarket = PolymarketAviationReader(settings)
+        self.rainviewer = RainViewerRadarAdapter(settings)
         self.iem = IEMASOSAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
         self.engine = LTACForecastEngine(settings)
@@ -73,6 +77,7 @@ class ForecastService:
         if bundle:
             self.repository.save_model_bundle(bundle)
         self.repository.save_market_snapshot(market)
+        radar = await self._safe_radar(metar.wind_direction_deg if metar else None)
         historical_weights = self.repository.latest_model_weights(self.settings.openmeteo_models)
         analysis = self.engine.run(
             target_date=target,
@@ -81,9 +86,10 @@ class ForecastService:
             model_bundle=bundle or ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target),
             market=market,
             historical_weights=historical_weights,
+            radar=radar,
         )
         self.repository.save_forecast_analysis(analysis, report_label=report_label)
-        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market)
+        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market, radar=radar)
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
@@ -175,6 +181,7 @@ class ForecastService:
             self.visualcrossing.health(),
             self.tomorrow.health(),
             self.polymarket.health(),
+            self.rainviewer.health(),
             self.iem.health(),
             self.wunderground.health(),
         )
@@ -238,5 +245,11 @@ class ForecastService:
     async def _safe_market(self, target_date: date) -> MarketSnapshot | None:
         try:
             return await self.polymarket.get_market(target_date)
+        except Exception:
+            return None
+
+    async def _safe_radar(self, wind_direction_deg: int | None) -> RadarMotionSignal | None:
+        try:
+            return await self.rainviewer.get_radar_motion(wind_direction_deg)
         except Exception:
             return None

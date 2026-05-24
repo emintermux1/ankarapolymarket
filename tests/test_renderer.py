@@ -82,7 +82,7 @@ def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     assert "• Beklenen EV: $" not in text
 
 
-def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None:
+def test_renderer_uses_report_labels_and_shows_local_weather_adjustments() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)
     analysis = ForecastAnalysis(
@@ -99,7 +99,12 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
         verdict="17.5°C merkezli kontrollü tahmin",
         adjustments=[
             ForecastAdjustment(name="live_observation", value_c=0.0, summary="METAR hedef gün değil", inputs={}),
-            ForecastAdjustment(name="ltac_microclimate", value_c=0.0, summary="placeholder", inputs={}),
+            ForecastAdjustment(name="radar_motion", value_c=-0.2, summary="canlı radar hücresi LTAC yönüne yaklaşıyor", inputs={}),
+            ForecastAdjustment(name="satellite_cloud_cooling", value_c=-0.3, summary="öğlen bulut proxy %80", inputs={}),
+            ForecastAdjustment(name="metar_anomaly", value_c=0.0, summary="METAR anomalisi yok", inputs={}),
+            ForecastAdjustment(name="ltac_microclimate", value_c=-0.1, summary="Esenboğa plato mikrokliması; rakım 953 m", inputs={}),
+            ForecastAdjustment(name="airport_heat_island", value_c=0.2, summary="havalimanı yüzey ısı adası", inputs={}),
+            ForecastAdjustment(name="runway_radiation", value_c=0.1, summary="pist radyasyon ısınması", inputs={}),
         ],
     )
     text = renderer.daily_report(
@@ -112,5 +117,9 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     )
     assert text.startswith("ANKARA ESENBOĞA ÖĞLE GÜNCELLEMESİ")
     assert "Canlı sapma: METAR hedef gün değil" in text
-    assert "mikroklima" not in text.lower()
+    assert "Canlı radar: canlı radar hücresi LTAC yönüne yaklaşıyor" in text
+    assert "Uydu bulut soğuması: öğlen bulut proxy %80" in text
+    assert "Esenboğa mikroklima: Esenboğa plato mikrokliması" in text
+    assert "Havalimanı ısı adası: havalimanı yüzey ısı adası" in text
+    assert "Pist radyasyon ısınması: pist radyasyon ısınması" in text
     assert "placeholder" not in text
