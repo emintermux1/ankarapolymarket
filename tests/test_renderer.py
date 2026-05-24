@@ -40,7 +40,7 @@ def test_renderer_marks_missing_market_without_fake_numbers() -> None:
     assert "veri yok" in text
     assert "unavailable" not in text
     assert "Yatırım tavsiyesi değildir" in text
-    assert "• Polymarket link" in text
+    assert "Polymarket marketi" in text
     assert "* Polymarket link" not in text
 
 
@@ -86,11 +86,9 @@ def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
 
     text = renderer.daily_report(analysis=analysis, metar=None, taf=None, model_bundle=None, market=market)
 
-    assert "Sınır riski: YÜKSEK" in text
-    assert "• 20°C: 2.1¢, fair 16.1%, edge +14.0 pp" in text
-    assert "• Önerilen bracket: BET YOK" in text
-    assert "• En iyi aday (işlem yok): 20°C" in text
-    assert "• Beklenen EV: gösterilmiyor (SKIP)" in text
+    assert "⚠️ Risk 🔴 YÜKSEK" in text
+    assert "💵 Polymarket Canlı Fiyat (20°C): 2.1¢" in text
+    assert "En güçlü fiyat/fair ayrışması 20°C için +14.0 pp" in text
     assert "• Beklenen EV: $" not in text
 
 
@@ -123,9 +121,9 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
         market=None,
         report_label="12:00",
     )
-    assert text.startswith("ANKARA ESENBOĞA ÖĞLE GÜNCELLEMESİ")
-    assert "Canlı sapma: METAR hedef gün değil" in text
-    assert "Basınç/üst seviye: 06-09→12-15 basınç trendi -2.0 hPa" in text
+    assert text.startswith("☁️ Ankara Esenboğa Günün Tahmini")
+    assert "Meteorolojik Veriler" in text
+    assert "Basınç: veri yok" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
 
@@ -216,10 +214,10 @@ def test_renderer_highlights_temperature_forecast_trends() -> None:
         previous_model_tmax_c={"ecmwf": 21.0, "gfs": 19.8, "icon": 20.0},
     )
 
-    assert "• Beklenen maksimum: 21.0°C 🔺 +0.6°C" in text
-    assert "• ECMWF: 22.0°C 🔺 +1.0°C" in text
-    assert "• GFS: 19.0°C 🔻 -0.8°C" in text
-    assert "• ICON: 20.0°C\n" in text
+    assert "👥 Bot Tahmini: 21.0°C 🔺 +0.6°C" in text
+    assert 'ECMWF</a>: 22.0°C 🔺 +1.0°C' in text
+    assert 'GFS</a>: 19.0°C 🔻 -0.8°C' in text
+    assert 'ICON</a>: 20.0°C\n' in text
 
 
 def test_renderer_adds_cloud_dynamics_panel() -> None:

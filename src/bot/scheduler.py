@@ -50,7 +50,7 @@ async def _send_daily_report(application: Application, service: ForecastService,
         logger.warning("telegram channel id is not configured")
         return
     text = await service.render_daily_report(report_label=label)
-    await _send_long(application, service.settings.telegram_channel_id, text)
+    await _send_long(application, service.settings.telegram_channel_id, text, parse_mode="HTML")
 
 
 async def _send_result_report(application: Application, service: ForecastService, label: str) -> None:
@@ -61,7 +61,7 @@ async def _send_result_report(application: Application, service: ForecastService
     await _send_long(application, service.settings.telegram_channel_id, text)
 
 
-async def _send_long(application: Application, chat_id: str, text: str) -> None:
+async def _send_long(application: Application, chat_id: str, text: str, parse_mode: str | None = None) -> None:
     while text:
         chunk = text[:3900]
         if len(text) > 3900:
@@ -71,7 +71,7 @@ async def _send_long(application: Application, chat_id: str, text: str) -> None:
         await application.bot.send_message(
             chat_id=chat_id,
             text=chunk,
+            parse_mode=parse_mode,
             link_preview_options=_DISABLE_LINK_PREVIEWS,
         )
         text = text[len(chunk):].lstrip()
-
