@@ -110,10 +110,16 @@ class ModelHourlyPoint(BaseModel):
     surface_pressure_hpa: float | None = None
     shortwave_radiation_wm2: float | None = None
     cape_jkg: float | None = None
+    temperature_925hpa_c: float | None = None
+    relative_humidity_700hpa_pct: float | None = None
     temperature_850hpa_c: float | None = None
     geopotential_height_500hpa_m: float | None = None
+    wind_speed_250hpa_kt: float | None = None
+    wind_direction_250hpa_deg: float | None = None
     wind_speed_850hpa_kt: float | None = None
     wind_direction_850hpa_deg: float | None = None
+    soil_temperature_0cm_c: float | None = None
+    soil_moisture_0_to_1cm_m3m3: float | None = None
     cloud_base_m: float | None = None
     cloud_ceiling_m: float | None = None
 

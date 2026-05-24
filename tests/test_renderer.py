@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from src.config import Settings
-from src.data_sources.schemas import ForecastAdjustment, ForecastAnalysis, MarketOutcome, MarketSnapshot
+from src.data_sources.schemas import (
+    ForecastAdjustment,
+    ForecastAnalysis,
+    MarketOutcome,
+    MarketSnapshot,
+    ModelBundle,
+    ModelForecast,
+    ModelHourlyPoint,
+)
 from src.reports.telegram_renderer import TelegramReportRenderer
 
 
@@ -114,3 +122,81 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     assert "Canlı sapma: METAR hedef gün değil" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
+
+
+def test_renderer_surfaces_upper_air_profile_signal() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=datetime.now(timezone.utc),
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=22.0,
+        final_tmax_c=21.8,
+        main_range_low_c=21.0,
+        main_range_high_c=22.6,
+        model_spread_c=0.7,
+        confidence_score=72,
+        confidence_factors={},
+        verdict="21.8°C merkezli kontrollü tahmin",
+        adjustments=[
+            ForecastAdjustment(
+                name="upper_air_profile",
+                value_c=-0.2,
+                summary="sabah inversiyon +3.0°C, 500 hPa 5720 m, 250 hPa jet 80 kt",
+                inputs={},
+            ),
+        ],
+    )
+
+    text = renderer.daily_report(
+        analysis=analysis,
+        metar=None,
+        taf=None,
+        model_bundle=None,
+        market=None,
+    )
+
+    assert "Üst seviye/profil: sabah inversiyon +3.0°C" in text
+
+
+def test_advanced_signals_report_lists_professional_layers() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    bundle = ModelBundle(
+        fetch_timestamp=datetime.now(timezone.utc),
+        target_date=date(2026, 5, 24),
+        forecasts=[
+            ModelForecast(
+                model="icon_eu",
+                available=True,
+                target_date=date(2026, 5, 24),
+                tmax_c=22.0,
+                hourly=[
+                    ModelHourlyPoint(
+                        time=datetime(2026, 5, 24, 7, tzinfo=timezone.utc),
+                        temperature_2m_c=10.0,
+                        temperature_925hpa_c=13.0,
+                    ),
+                    ModelHourlyPoint(
+                        time=datetime(2026, 5, 24, 12, tzinfo=timezone.utc),
+                        temperature_925hpa_c=17.0,
+                        temperature_850hpa_c=11.0,
+                        geopotential_height_500hpa_m=5710,
+                        wind_speed_250hpa_kt=88,
+                        relative_humidity_700hpa_pct=72,
+                        cape_jkg=350,
+                        soil_moisture_0_to_1cm_m3m3=0.19,
+                        soil_temperature_0cm_c=23.0,
+                    ),
+                ],
+            )
+        ],
+    )
+
+    text = renderer.advanced_signals_report(bundle)
+
+    assert text.startswith("İLERİ METEOROLOJİ SİNYALLERİ")
+    assert "500 hPa yükseklik: 5,710 m" in text
+    assert "Jet akımı: 88 kt" in text
+    assert "Okyanus/SST/ENSO" in text

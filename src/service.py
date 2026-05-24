@@ -116,6 +116,13 @@ class ForecastService:
             self.repository.save_model_bundle(bundle)
         return self.renderer.models_report(bundle)
 
+    async def render_advanced_signals(self, target_date: date | None = None) -> str:
+        target = target_date or self.default_target_date()
+        bundle = await self._safe_models(target)
+        if bundle:
+            self.repository.save_model_bundle(bundle)
+        return self.renderer.advanced_signals_report(bundle)
+
     async def render_market(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
         market = await self._safe_market(target)
