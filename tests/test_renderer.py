@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from src.config import Settings
-from src.data_sources.schemas import ForecastAdjustment, ForecastAnalysis, MarketOutcome, MarketSnapshot
+from src.data_sources.schemas import ForecastAdjustment, ForecastAnalysis, MarketOutcome, MarketSnapshot, METARNormalized
 from src.reports.telegram_renderer import TelegramReportRenderer
 
 
@@ -114,3 +114,43 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     assert "Canlı sapma: METAR hedef gün değil" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
+
+
+def test_renderer_adds_rounding_alarm_with_metar_thresholds() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=datetime.now(timezone.utc),
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=20.0,
+        final_tmax_c=20.0,
+        main_range_low_c=19.5,
+        main_range_high_c=20.5,
+        model_spread_c=0.8,
+        probability_sigma_c=0.8,
+        confidence_score=72,
+        confidence_factors={},
+        verdict="20.0°C merkezli kontrollü tahmin",
+    )
+    metar = METARNormalized(
+        fetch_timestamp=datetime.now(timezone.utc),
+        observation_time=datetime(2026, 5, 24, 9, 50, tzinfo=timezone.utc),
+        temperature_c=20.0,
+        dew_point_c=8.0,
+        wind_direction_deg=20,
+        wind_speed_kt=14,
+        cloud_layers=[{"cover": "BKN", "base": 4500}],
+        raw_text="LTAC 240950Z 02014KT 9999 BKN045 20/08 Q1016 NOSIG",
+    )
+
+    text = renderer.daily_report(analysis=analysis, metar=metar, taf=None, model_bundle=None, market=None)
+
+    assert "🚨 YUVARLAMA ALARMI:" in text
+    assert "Marketin kaderi 20.5°C sınırında" in text
+    assert "20.5°C = 21°C" in text
+    assert "• Anlık değer: 20.0°C (68°F)" in text
+    assert "69°F (20.55°C) için +0.55°C gerekiyor" in text
+    assert "020° / 14 KT -> kuzeyli akış ısınmayı baskılayacak" in text
+    assert "BKN (güneşlenme kısıtlı)" in text
+    assert "NOSIG (değişim beklenmiyor)" in text

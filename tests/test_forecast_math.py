@@ -5,10 +5,21 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.data_sources.schemas import EnsembleForecast, ForecastAdjustment, METARNormalized, MarketOutcome, MarketSnapshot, ModelForecast
+from src.config import Settings
+from src.data_sources.schemas import (
+    EnsembleForecast,
+    ForecastAdjustment,
+    METARNormalized,
+    MarketOutcome,
+    MarketSnapshot,
+    ModelBundle,
+    ModelForecast,
+    round_market_temperature_c,
+)
 from src.forecast.confidence import calculate_confidence
-from src.forecast.engine import _fair_probabilities, _risks
+from src.forecast.engine import LTACForecastEngine, _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
+from src.forecast.ltac_microclimate import calculate_ltac_microclimate_adjustment
 
 
 def test_metar_rejects_dewpoint_above_temperature() -> None:
@@ -115,6 +126,60 @@ def test_market_fair_probabilities_use_integer_brackets() -> None:
     probabilities = _fair_probabilities(18.2, 0.8, market)
     assert probabilities["18°C"] > probabilities["19°C"]
     assert probabilities["23°C or higher"] < 0.01
+
+
+def test_market_temperature_rounding_half_up() -> None:
+    assert round_market_temperature_c(20.49) == 20
+    assert round_market_temperature_c(20.5) == 21
+    assert round_market_temperature_c(21.5) == 22
+
+
+def test_ltac_microclimate_adds_westerly_asphalt_offset() -> None:
+    metar = METARNormalized(
+        fetch_timestamp=datetime.now(timezone.utc),
+        observation_time=datetime.now(timezone.utc),
+        temperature_c=20.0,
+        dew_point_c=8.0,
+        wind_direction_deg=270,
+        wind_speed_kt=12,
+        raw_text="LTAC 241200Z 27012KT 9999 SCT040 20/08 Q1016 NOSIG",
+    )
+
+    adjustment = calculate_ltac_microclimate_adjustment(metar)
+
+    assert adjustment.value_c == 0.4
+    assert adjustment.inputs["active"] is True
+
+
+def test_engine_applies_ltac_westerly_microclimate_to_final_tmax() -> None:
+    target_date = datetime.now(timezone.utc).date()
+    metar = METARNormalized(
+        fetch_timestamp=datetime.now(timezone.utc),
+        observation_time=datetime.now(timezone.utc),
+        temperature_c=20.0,
+        dew_point_c=8.0,
+        wind_direction_deg=270,
+        wind_speed_kt=12,
+        raw_text="LTAC 241200Z 27012KT 9999 SCT040 20/08 Q1016 NOSIG",
+    )
+    bundle = ModelBundle(
+        fetch_timestamp=datetime.now(timezone.utc),
+        target_date=target_date,
+        forecasts=[ModelForecast(model="ecmwf_ifs025", available=True, target_date=target_date, tmax_c=20.0)],
+    )
+
+    analysis = LTACForecastEngine(Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)).run(
+        target_date=target_date,
+        metar=metar,
+        taf=None,
+        model_bundle=bundle,
+        market=None,
+        historical_weights={},
+    )
+
+    assert analysis.final_tmax_c == 20.4
+    assert any(item.name == "ltac_microclimate" and item.value_c == 0.4 for item in analysis.adjustments)
+    assert "istasyon değişkeni" in analysis.risks["upward"]
 
 
 def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:

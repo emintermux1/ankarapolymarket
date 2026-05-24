@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from src.config import Settings
 from src.data_sources.base import HttpSource, SourceError
-from src.data_sources.schemas import ActualResult, ModelForecast, SourceHealth, SourceState
+from src.data_sources.schemas import ActualResult, ModelForecast, SourceHealth, SourceState, round_market_temperature_c
 
 
 class VisualCrossingAdapter(HttpSource):
@@ -65,7 +65,7 @@ class VisualCrossingAdapter(HttpSource):
             source=self.source_name,
             fetched_at=datetime.now(timezone.utc),
             tmax_c=tmax,
-            rounded_tmax_c=round(tmax),
+            rounded_tmax_c=round_market_temperature_c(tmax),
             raw_payload={
                 "resolvedAddress": payload.get("resolvedAddress"),
                 "timezone": payload.get("timezone"),

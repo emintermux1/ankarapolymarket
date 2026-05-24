@@ -25,6 +25,7 @@ from src.forecast.ensemble import (
     weighted_model_tmax,
 )
 from src.forecast.live_adjustment import calculate_live_observation_adjustment
+from src.forecast.ltac_microclimate import calculate_ltac_microclimate_adjustment
 from src.forecast.soil_rain import calculate_rain_soil_adjustment
 
 
@@ -124,12 +125,7 @@ class LTACForecastEngine:
             calculate_advection_adjustment(metar, forecasts),
             calculate_cloud_radiation_adjustment(forecasts),
             calculate_rain_soil_adjustment(taf, forecasts),
-            ForecastAdjustment(
-                name="ltac_microclimate",
-                value_c=0.0,
-                summary="LTAC plato/kırsal maruziyet etkisi geçmiş performansla kalibre edilecek; backtest olmadan sabit offset yok",
-                inputs={"elevation_m": self.settings.ltac_elevation_m},
-            ),
+            calculate_ltac_microclimate_adjustment(metar),
             ForecastAdjustment(
                 name="uncertainty",
                 value_c=0.0,
@@ -238,9 +234,11 @@ def _rationale(
         bullets.append(f"Ensemble belirsizliği ±{ens_sigma:.1f}°C; olasılık hesabında ±{prob_sigma:.1f}°C kullanıldı.")
     if metar is not None:
         bullets.append(f"Son METAR {metar.temperature_c:.0f}/{metar.dew_point_c:.0f}°C ve rüzgâr {metar.wind_direction_deg or 'VRB'}°/{metar.wind_speed_kt:.0f} kt.")
-    for name in ("live_observation", "cloud_radiation", "rain_soil", "advection"):
+    for name in ("live_observation", "ltac_microclimate", "cloud_radiation", "rain_soil", "advection"):
         adj = next((item for item in adjustments if item.name == name), None)
         if adj and adj.summary and len(bullets) < 6:
+            if name == "ltac_microclimate" and abs(adj.value_c) < 0.05:
+                continue
             bullets.append(f"{adj.summary}; etki {adj.value_c:+.1f}°C.")
     if taf and taf.rain_or_storm_risk and len(bullets) < 6:
         bullets.append("TAF içinde SHRA/TSRA/CB riski var; öğlen ısınma tavanı belirsiz.")
@@ -256,6 +254,7 @@ def _risks(
     rain = next((item for item in adjustments if item.name == "rain_soil"), None)
     advection = next((item for item in adjustments if item.name == "advection"), None)
     live = next((item for item in adjustments if item.name == "live_observation"), None)
+    microclimate = next((item for item in adjustments if item.name == "ltac_microclimate"), None)
     upward_parts: list[str] = []
     downward_parts: list[str] = []
     critical_parts: list[str] = []
@@ -265,6 +264,8 @@ def _risks(
         upward_parts.append(f"yüksek radyasyon/düşük bulut ({cloud.summary})")
     if live and live.value_c > 0.7:
         upward_parts.append(f"canlı gözlem model patikasından sıcak ({live.summary})")
+    if microclimate and microclimate.value_c > 0.2:
+        upward_parts.append(f"istasyon değişkeni ({microclimate.summary})")
     if cloud and cloud.value_c < -0.7:
         downward_parts.append(f"radyasyon baskısı yüksek ({cloud.summary})")
     if rain and rain.value_c < -0.5:

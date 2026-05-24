@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 
 from src.config import Settings
 from src.data_sources.base import HttpSource
-from src.data_sources.schemas import ActualResult, SourceHealth, SourceState
+from src.data_sources.schemas import ActualResult, SourceHealth, SourceState, round_market_temperature_c
 
 
 class WundergroundScraper(HttpSource):
@@ -35,7 +35,7 @@ class WundergroundScraper(HttpSource):
             source=self.source_name,
             fetched_at=datetime.now(timezone.utc),
             tmax_c=parsed,
-            rounded_tmax_c=round(parsed),
+            rounded_tmax_c=round_market_temperature_c(parsed),
             raw_payload={"url": url},
         )
 
@@ -62,4 +62,3 @@ class WundergroundScraper(HttpSource):
             if match:
                 return float(match.group(1))
         return None
-

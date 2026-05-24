@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from src.config import Settings
 from src.data_sources.base import HttpSource
-from src.data_sources.schemas import ActualResult, SourceHealth, SourceState
+from src.data_sources.schemas import ActualResult, SourceHealth, SourceState, round_market_temperature_c
 
 
 class IEMASOSAdapter(HttpSource):
@@ -72,7 +72,7 @@ class IEMASOSAdapter(HttpSource):
             source=self.source_name,
             fetched_at=datetime.now(timezone.utc),
             tmax_c=tmax,
-            rounded_tmax_c=round(tmax),
+            rounded_tmax_c=round_market_temperature_c(tmax),
             raw_payload={"rows": rows, "observation_count": len(values)},
         )
 
@@ -85,4 +85,3 @@ class IEMASOSAdapter(HttpSource):
             return SourceHealth(source=self.source_name, state=SourceState.OK, latency_ms=latency)
         except Exception as exc:
             return SourceHealth(source=self.source_name, state=SourceState.DOWN, message=str(exc))
-

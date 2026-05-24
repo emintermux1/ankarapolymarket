@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from enum import StrEnum
 from math import exp
 from typing import Any
@@ -248,3 +249,7 @@ def relative_humidity_from_temp_dewpoint(temp_c: float, dewpoint_c: float) -> in
     numerator = exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
     denominator = exp((17.625 * temp_c) / (243.04 + temp_c))
     return int(round(max(0.0, min(100.0, 100.0 * numerator / denominator))))
+
+
+def round_market_temperature_c(value: float) -> int:
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
