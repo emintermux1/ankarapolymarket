@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import math
 from datetime import date, datetime, time, timezone
 from io import StringIO
 from typing import Any
@@ -9,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from src.config import Settings
 from src.data_sources.base import HttpSource
-from src.data_sources.schemas import ActualResult, SourceHealth, SourceState
+from src.data_sources.schemas import ActualResult, SourceHealth, SourceState, round_market_temperature_c
 
 
 class IEMASOSAdapter(HttpSource):
@@ -98,7 +97,7 @@ def _actual_result_from_rows(target_date: date, rows: list[dict[str, Any]], sour
         source=source,
         fetched_at=datetime.now(timezone.utc),
         tmax_c=tmax,
-        rounded_tmax_c=_reported_integer_temperature(tmax),
+        rounded_tmax_c=round_market_temperature_c(tmax),
         raw_payload={
             "rows": rows,
             "observation_count": len(values),
@@ -106,7 +105,3 @@ def _actual_result_from_rows(target_date: date, rows: list[dict[str, Any]], sour
             "max_metar": max_row.get("metar"),
         },
     )
-
-
-def _reported_integer_temperature(value: float) -> int:
-    return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)

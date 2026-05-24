@@ -143,10 +143,12 @@ class LTACForecastEngine:
         metar: METARNormalized | None,
         forecasts: list,
     ) -> ForecastAdjustment:
-        avg_wind_dir = _surface_wind_direction(metar, forecasts)
+        metar_wind_dir = float(metar.wind_direction_deg) if metar and metar.wind_direction_deg is not None else None
+        avg_wind_dir = metar_wind_dir if metar_wind_dir is not None else _surface_wind_direction(None, forecasts)
         sunshine_pct = _midday_sunshine_pct(forecasts)
         inputs = {
             "elevation_m": self.settings.ltac_elevation_m,
+            "metar_wind_direction_deg": metar_wind_dir,
             "avg_surface_wind_direction_deg": avg_wind_dir,
             "midday_sunshine_pct": sunshine_pct,
             "westerly_runway_bias_c": self.settings.ltac_westerly_runway_bias_c,
@@ -162,14 +164,7 @@ class LTACForecastEngine:
             return ForecastAdjustment(
                 name="ltac_microclimate",
                 value_c=0.0,
-                summary=f"LTAC pist/asfalt offseti tetiklenmedi; ortalama rüzgâr {avg_wind_dir:.0f}°",
-                inputs=inputs,
-            )
-        if sunshine_pct is not None and sunshine_pct < 45:
-            return ForecastAdjustment(
-                name="ltac_microclimate",
-                value_c=0.0,
-                summary=f"batı rüzgârı var ama güneşlenme %{sunshine_pct:.0f}; asfalt offseti kapalı",
+                summary=f"LTAC pist/asfalt offseti tetiklenmedi; rüzgâr {avg_wind_dir:.0f}°",
                 inputs=inputs,
             )
         value = round(float(self.settings.ltac_westerly_runway_bias_c), 2)
@@ -177,7 +172,7 @@ class LTACForecastEngine:
         return ForecastAdjustment(
             name="ltac_microclimate",
             value_c=value,
-            summary=f"Esenboğa batı rüzgârı + pist asfalt etkisi{sunshine_text}; LTAC sensör offseti",
+            summary=f"Esenboğa batı rüzgârı pist/asfalt ısısını METAR termometresine taşıyor{sunshine_text}",
             inputs=inputs,
         )
 
