@@ -10,6 +10,7 @@ from src.data_sources.schemas import (
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
+    NowcastingSignal,
     SourceHealth,
     TAFNormalized,
 )
@@ -58,6 +59,9 @@ class TelegramReportRenderer:
                 "Hava dinamiği:",
                 *self._dynamic_lines(analysis),
                 "",
+                "Esenboğa nowcasting:",
+                *self._nowcasting_lines(analysis.nowcasting_signals),
+                "",
                 "Neden bu tahmin?",
                 *self._rationale_lines(analysis),
                 "",
@@ -104,6 +108,9 @@ class TelegramReportRenderer:
         if bundle is None:
             return "Model verisi yok."
         return "\n".join(["MODEL KARŞILAŞTIRMA", *self._model_lines(bundle)])
+
+    def nowcasting_report(self, signals: list[NowcastingSignal]) -> str:
+        return "\n".join(["ESENBOĞA NOWCASTING", *self._nowcasting_lines(signals)])
 
     def market_report(self, analysis: ForecastAnalysis | None, market: MarketSnapshot | None) -> str:
         if market is None:
@@ -214,6 +221,15 @@ class TelegramReportRenderer:
             _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
             _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
         ]
+
+    def _nowcasting_lines(self, signals: list[NowcastingSignal]) -> list[str]:
+        if not signals:
+            return [_bullet("Nowcasting sinyali: veri yok")]
+        lines = []
+        for signal in signals:
+            suffix = f" — {signal.summary}" if signal.summary else ""
+            lines.append(_bullet(f"{signal.label}: {signal.state}{suffix}"))
+        return lines
 
     def _rationale_lines(self, analysis: ForecastAnalysis) -> list[str]:
         if not analysis.rationale_bullets:

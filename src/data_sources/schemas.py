@@ -210,6 +210,15 @@ class ForecastAdjustment(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
 
 
+class NowcastingSignal(BaseModel):
+    name: str
+    label: str
+    state: str
+    summary: str
+    severity: str = "info"
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+
 class ForecastAnalysis(BaseModel):
     target_date: date
     generated_at: datetime
@@ -231,6 +240,7 @@ class ForecastAnalysis(BaseModel):
     edge_summary: str = "Edge yok"
     rationale_bullets: list[str] = Field(default_factory=list)
     risks: dict[str, str] = Field(default_factory=dict)
+    nowcasting_signals: list[NowcastingSignal] = Field(default_factory=list)
 
 
 class ActualResult(BaseModel):
