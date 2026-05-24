@@ -266,10 +266,16 @@ class TelegramReportRenderer:
         lookup = {item.name: item for item in analysis.adjustments}
         return [
             _bullet(f"Canlı sapma: {_adj(lookup.get('live_observation'))}"),
+            _bullet(f"Canlı radar: {_adj(lookup.get('radar_motion'))}"),
             _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
             _bullet(f"Basınç/üst seviye: {_adj(lookup.get('synoptic_pressure'))}"),
             _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
+            _bullet(f"Uydu bulut soğuması: {_adj(lookup.get('satellite_cloud_cooling'))}"),
+            _bullet(f"METAR anomali: {_adj(lookup.get('metar_anomaly'))}"),
             _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
+            _bullet(f"Esenboğa mikroklima: {_adj(lookup.get('ltac_microclimate'))}"),
+            _bullet(f"Havalimanı ısı adası: {_adj(lookup.get('airport_heat_island'))}"),
+            _bullet(f"Pist radyasyon ısınması: {_adj(lookup.get('runway_radiation'))}"),
         ]
 
     def _rationale_lines(self, analysis: ForecastAnalysis) -> list[str]:

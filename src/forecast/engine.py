@@ -10,6 +10,7 @@ from src.data_sources.schemas import (
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
+    RadarMotionSignal,
     TAFNormalized,
 )
 from src.forecast.advection import calculate_advection_adjustment
@@ -25,6 +26,14 @@ from src.forecast.ensemble import (
     weighted_model_tmax,
 )
 from src.forecast.live_adjustment import calculate_live_observation_adjustment
+from src.forecast.local_effects import (
+    calculate_airport_heat_island_adjustment,
+    calculate_metar_anomaly_adjustment,
+    calculate_microclimate_adjustment,
+    calculate_radar_motion_adjustment,
+    calculate_runway_radiation_adjustment,
+    calculate_satellite_cloud_cooling_adjustment,
+)
 from src.forecast.soil_rain import calculate_rain_soil_adjustment
 from src.forecast.synoptic_pressure import calculate_synoptic_pressure_adjustment
 
@@ -42,6 +51,7 @@ class LTACForecastEngine:
         model_bundle: ModelBundle,
         market: MarketSnapshot | None,
         historical_weights: dict[str, dict[str, float | None]],
+        radar: RadarMotionSignal | None = None,
     ) -> ForecastAnalysis:
         forecasts = model_bundle.forecasts
         available = model_bundle.available_forecasts
@@ -62,7 +72,7 @@ class LTACForecastEngine:
             ensemble_sigma_c=ens_sigma,
             historical_sigma_c=hist_sigma,
         )
-        adjustments = self._adjustments(target_date, metar, taf, forecasts)
+        adjustments = self._adjustments(target_date, metar, taf, forecasts, radar)
         final = None
         if base_tmax is not None:
             final = base_tmax + sum(item.value_c for item in adjustments)
@@ -83,6 +93,15 @@ class LTACForecastEngine:
             has_history=bool(historical_weights),
             market=market,
         )
+        metar_anomaly_severity = _extract_adjustment_input(adjustments, "metar_anomaly", "severity")
+        if metar_anomaly_severity is not None and metar_anomaly_severity >= 0.5:
+            confidence -= 10 if metar_anomaly_severity >= 0.8 else 5
+            factors["metar_anomaly"] = "high" if metar_anomaly_severity >= 0.8 else "moderate"
+        radar_confidence = _extract_adjustment_input(adjustments, "radar_motion", "confidence")
+        radar_motion = _extract_adjustment_string(adjustments, "radar_motion", "motion")
+        if radar_confidence is not None and radar_motion in {"approaching", "overhead", "intensifying_overhead"}:
+            factors["radar_motion"] = radar_motion
+        confidence = int(max(0, min(100, confidence)))
         factors["deterministic_model_spread_c"] = round(spread, 2) if spread is not None else None
         factors["ensemble_sigma_c"] = round(ens_sigma, 2) if ens_sigma is not None else None
         factors["historical_mae_sigma_c"] = round(hist_sigma, 2) if hist_sigma is not None else None
@@ -119,19 +138,20 @@ class LTACForecastEngine:
         metar: METARNormalized | None,
         taf: TAFNormalized | None,
         forecasts: list,
+        radar: RadarMotionSignal | None,
     ) -> list[ForecastAdjustment]:
         return [
             calculate_live_observation_adjustment(metar, forecasts, target_date, self.settings.report_timezone),
             calculate_advection_adjustment(metar, forecasts),
             calculate_synoptic_pressure_adjustment(forecasts),
+            calculate_radar_motion_adjustment(radar, target_date, self.settings.report_timezone),
             calculate_cloud_radiation_adjustment(forecasts),
+            calculate_satellite_cloud_cooling_adjustment(forecasts),
+            calculate_metar_anomaly_adjustment(metar, forecasts, target_date, self.settings.report_timezone),
             calculate_rain_soil_adjustment(taf, forecasts),
-            ForecastAdjustment(
-                name="ltac_microclimate",
-                value_c=0.0,
-                summary="LTAC plato/kırsal maruziyet etkisi geçmiş performansla kalibre edilecek; backtest olmadan sabit offset yok",
-                inputs={"elevation_m": self.settings.ltac_elevation_m},
-            ),
+            calculate_microclimate_adjustment(metar, forecasts, self.settings.ltac_elevation_m),
+            calculate_airport_heat_island_adjustment(metar, forecasts),
+            calculate_runway_radiation_adjustment(metar, forecasts),
             ForecastAdjustment(
                 name="uncertainty",
                 value_c=0.0,
@@ -146,6 +166,14 @@ def _extract_adjustment_input(adjustments: list[ForecastAdjustment], name: str, 
         if adjustment.name == name:
             value = adjustment.inputs.get(key)
             return float(value) if value is not None else None
+    return None
+
+
+def _extract_adjustment_string(adjustments: list[ForecastAdjustment], name: str, key: str) -> str | None:
+    for adjustment in adjustments:
+        if adjustment.name == name:
+            value = adjustment.inputs.get(key)
+            return str(value) if value is not None else None
     return None
 
 
@@ -240,7 +268,17 @@ def _rationale(
         bullets.append(f"Ensemble belirsizliği ±{ens_sigma:.1f}°C; olasılık hesabında ±{prob_sigma:.1f}°C kullanıldı.")
     if metar is not None:
         bullets.append(f"Son METAR {metar.temperature_c:.0f}/{metar.dew_point_c:.0f}°C ve rüzgâr {metar.wind_direction_deg or 'VRB'}°/{metar.wind_speed_kt:.0f} kt.")
-    for name in ("live_observation", "synoptic_pressure", "cloud_radiation", "rain_soil", "advection"):
+    for name in (
+        "live_observation",
+        "synoptic_pressure",
+        "radar_motion",
+        "cloud_radiation",
+        "satellite_cloud_cooling",
+        "rain_soil",
+        "advection",
+        "airport_heat_island",
+        "runway_radiation",
+    ):
         adj = next((item for item in adjustments if item.name == name), None)
         if adj and adj.summary and len(bullets) < 6:
             bullets.append(f"{adj.summary}; etki {adj.value_c:+.1f}°C.")
@@ -255,10 +293,15 @@ def _risks(
     taf: TAFNormalized | None,
 ) -> dict[str, str]:
     cloud = next((item for item in adjustments if item.name == "cloud_radiation"), None)
+    satellite = next((item for item in adjustments if item.name == "satellite_cloud_cooling"), None)
     rain = next((item for item in adjustments if item.name == "rain_soil"), None)
     advection = next((item for item in adjustments if item.name == "advection"), None)
     live = next((item for item in adjustments if item.name == "live_observation"), None)
     synoptic = next((item for item in adjustments if item.name == "synoptic_pressure"), None)
+    radar = next((item for item in adjustments if item.name == "radar_motion"), None)
+    anomaly = next((item for item in adjustments if item.name == "metar_anomaly"), None)
+    heat_island = next((item for item in adjustments if item.name == "airport_heat_island"), None)
+    runway = next((item for item in adjustments if item.name == "runway_radiation"), None)
     upward_parts: list[str] = []
     downward_parts: list[str] = []
     critical_parts: list[str] = []
@@ -270,8 +313,16 @@ def _risks(
         upward_parts.append(f"canlı gözlem model patikasından sıcak ({live.summary})")
     if synoptic and synoptic.value_c > 0.2:
         upward_parts.append(f"yükselen basınç/sıcak üst seviye ({synoptic.summary})")
+    if heat_island and heat_island.value_c > 0.1:
+        upward_parts.append(f"havalimanı ısı adası ({heat_island.summary})")
+    if runway and runway.value_c > 0.1:
+        upward_parts.append(f"pist radyasyon ısınması ({runway.summary})")
     if cloud and cloud.value_c < -0.7:
         downward_parts.append(f"radyasyon baskısı yüksek ({cloud.summary})")
+    if satellite and satellite.value_c < -0.2:
+        downward_parts.append(f"uydu/proxy bulut soğuması ({satellite.summary})")
+    if radar and radar.value_c < -0.2:
+        downward_parts.append(f"canlı radar soğutması ({radar.summary})")
     if rain and rain.value_c < -0.5:
         downward_parts.append(f"yağış/zemin soğutması belirgin ({rain.summary})")
     if live and live.value_c < -0.7:
@@ -289,6 +340,8 @@ def _risks(
         cape_max = synoptic.inputs.get("midday_cape_max_jkg")
         if pressure_trend <= -3.0 and cape_max is not None and float(cape_max) >= 700.0:
             critical_parts.append("düşen basınç + CAPE konveksiyon riski")
+    if anomaly and (anomaly.inputs.get("severity") or 0) >= 0.5:
+        critical_parts.append(anomaly.summary)
     upward = "; ".join(upward_parts) if upward_parts else "Belirgin yukarı risk sinyali yok"
     downward = "; ".join(downward_parts) if downward_parts else "Belirgin aşağı risk sinyali yok"
     critical = "; ".join(critical_parts) if critical_parts else "Belirgin kritik belirsizlik sinyali yok"
