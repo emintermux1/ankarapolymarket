@@ -13,6 +13,7 @@ from src.data_sources.schemas import (
     RadarMotionSignal,
     TAFNormalized,
 )
+from src.forecast.ai_effect_analysis import calculate_ai_effect_analysis
 from src.forecast.advection import calculate_advection_adjustment
 from src.forecast.bias_correction import calculate_bias_offsets
 from src.forecast.cloud_radiation import calculate_cloud_radiation_adjustment
@@ -149,6 +150,7 @@ class LTACForecastEngine:
             calculate_satellite_cloud_cooling_adjustment(forecasts),
             calculate_metar_anomaly_adjustment(metar, forecasts, target_date, self.settings.report_timezone),
             calculate_rain_soil_adjustment(taf, forecasts),
+            calculate_ai_effect_analysis(metar, forecasts),
             calculate_microclimate_adjustment(metar, forecasts, self.settings.ltac_elevation_m),
             calculate_airport_heat_island_adjustment(metar, forecasts),
             calculate_runway_radiation_adjustment(metar, forecasts),
