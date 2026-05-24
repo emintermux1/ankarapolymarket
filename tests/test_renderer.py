@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from src.config import Settings
-from src.data_sources.schemas import ForecastAdjustment, ForecastAnalysis, MarketOutcome, MarketSnapshot
+from src.data_sources.schemas import ForecastAdjustment, ForecastAnalysis, MarketOutcome, MarketSnapshot, ModelBundle, ModelForecast
 from src.reports.telegram_renderer import TelegramReportRenderer
 
 
@@ -116,3 +116,59 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
     assert "Basınç/üst seviye: 06-09→12-15 basınç trendi -2.0 hPa" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
+
+
+def test_renderer_highlights_temperature_forecast_trends() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc)
+    previous = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=now,
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=20.2,
+        final_tmax_c=20.4,
+        main_range_low_c=19.5,
+        main_range_high_c=21.2,
+        model_spread_c=1.0,
+        confidence_score=65,
+        confidence_factors={},
+        verdict="20.4°C merkezli kontrollü tahmin",
+    )
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=now,
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=20.8,
+        final_tmax_c=21.0,
+        main_range_low_c=20.0,
+        main_range_high_c=22.0,
+        model_spread_c=3.0,
+        confidence_score=66,
+        confidence_factors={},
+        verdict="21.0°C merkezli kontrollü tahmin",
+    )
+    bundle = ModelBundle(
+        fetch_timestamp=now,
+        target_date=date(2026, 5, 24),
+        forecasts=[
+            ModelForecast(model="ecmwf", available=True, target_date=date(2026, 5, 24), tmax_c=22.0),
+            ModelForecast(model="gfs", available=True, target_date=date(2026, 5, 24), tmax_c=19.0),
+            ModelForecast(model="icon", available=True, target_date=date(2026, 5, 24), tmax_c=20.0),
+        ],
+    )
+
+    text = renderer.daily_report(
+        analysis=analysis,
+        metar=None,
+        taf=None,
+        model_bundle=bundle,
+        market=None,
+        previous_analysis=previous,
+        previous_model_tmax_c={"ecmwf": 21.0, "gfs": 19.8, "icon": 20.0},
+    )
+
+    assert "• Beklenen maksimum: 21.0°C 🔺 +0.6°C" in text
+    assert "• ECMWF: 22.0°C 🔺 +1.0°C" in text
+    assert "• GFS: 19.0°C 🔻 -0.8°C" in text
+    assert "• ICON: 20.0°C\n" in text

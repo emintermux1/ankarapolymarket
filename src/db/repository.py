@@ -258,6 +258,20 @@ class Repository:
                     }
         return weights
 
+    def latest_model_tmax_by_target(self, target_date: date) -> dict[str, float | None]:
+        with self.session_factory() as session:
+            rows = session.scalars(
+                select(ModelSnapshot)
+                .where(ModelSnapshot.target_date == target_date)
+                .order_by(ModelSnapshot.model, desc(ModelSnapshot.fetch_timestamp), desc(ModelSnapshot.id))
+            ).all()
+        latest: dict[str, float | None] = {}
+        for row in rows:
+            if row.model in latest:
+                continue
+            latest[row.model] = row.tmax_c if row.available else None
+        return latest
+
     def latest_backtest_summary(self) -> list[dict[str, Any]]:
         with self.session_factory() as session:
             rows = session.scalars(select(BacktestScore).order_by(desc(BacktestScore.score_date)).limit(20)).all()
@@ -304,4 +318,3 @@ def manual_actual_result(target_date: date, tmax_c: float) -> ActualResult:
         rounded_tmax_c=round(tmax_c),
         raw_payload={"entered_manually": True},
     )
-
