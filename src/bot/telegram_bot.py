@@ -27,6 +27,8 @@ def build_application(settings: Settings, service: ForecastService) -> Applicati
     application.add_handler(CommandHandler("models", commands.models))
     application.add_handler(CommandHandler("market", commands.market))
     application.add_handler(CommandHandler("edge", commands.edge))
+    application.add_handler(CommandHandler("aviation", commands.aviation))
+    application.add_handler(CommandHandler("ltac", commands.aviation))
     application.add_handler(CommandHandler("backtest", commands.backtest))
     application.add_handler(CommandHandler("sources", commands.sources))
     application.add_handler(CommandHandler("chart", commands.chart))
