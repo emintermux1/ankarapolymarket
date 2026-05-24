@@ -26,7 +26,6 @@ from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.wunderground import WundergroundScraper
 from src.db.repository import Repository, manual_actual_result
 from src.forecast.engine import LTACForecastEngine
-from src.llm.openai_client import OpenAIReportClient
 from src.reports.charts import ChartRenderer
 from src.reports.telegram_renderer import TelegramReportRenderer
 
@@ -55,7 +54,6 @@ class ForecastService:
         self.engine = LTACForecastEngine(settings)
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
-        self.llm = OpenAIReportClient(settings)
 
     def default_target_date(self) -> date:
         return datetime.now(ZoneInfo(self.settings.report_timezone)).date()
