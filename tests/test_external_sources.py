@@ -121,6 +121,33 @@ async def test_tomorrow_forecast_maps_cloud_ceiling_and_radiation(monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_openmeteo_forecast_maps_cape_and_cin(monkeypatch) -> None:
+    adapter = OpenMeteoAdapter(Settings(OPENMETEO_MODELS="gfs_seamless", TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert "convective_inhibition" in kwargs["params"]["hourly"]
+        return {
+            "latitude": 40.125,
+            "longitude": 33.0,
+            "elevation": 948,
+            "hourly": {
+                "time": ["2026-05-24T15:00"],
+                "temperature_2m_gfs_seamless": [22.0],
+                "cape_gfs_seamless": [850],
+                "convective_inhibition_gfs_seamless": [125],
+            },
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    bundle = await adapter.get_forecast(date(2026, 5, 24))
+
+    point = bundle.forecasts[0].hourly[0]
+    assert point.cape_jkg == 850
+    assert point.convective_inhibition_jkg == 125
+
+
+@pytest.mark.asyncio
 async def test_iem_intraday_high_tracks_reported_metar_integer_peak(monkeypatch) -> None:
     adapter = IEMASOSAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
     as_of = datetime(2026, 5, 24, 12, 45, tzinfo=timezone.utc)
