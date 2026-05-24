@@ -26,6 +26,7 @@ from src.forecast.ensemble import (
 )
 from src.forecast.live_adjustment import calculate_live_observation_adjustment
 from src.forecast.soil_rain import calculate_rain_soil_adjustment
+from src.forecast.synoptic_pressure import calculate_synoptic_pressure_adjustment
 
 
 class LTACForecastEngine:
@@ -122,6 +123,7 @@ class LTACForecastEngine:
         return [
             calculate_live_observation_adjustment(metar, forecasts, target_date, self.settings.report_timezone),
             calculate_advection_adjustment(metar, forecasts),
+            calculate_synoptic_pressure_adjustment(forecasts),
             calculate_cloud_radiation_adjustment(forecasts),
             calculate_rain_soil_adjustment(taf, forecasts),
             ForecastAdjustment(
@@ -238,7 +240,7 @@ def _rationale(
         bullets.append(f"Ensemble belirsizliği ±{ens_sigma:.1f}°C; olasılık hesabında ±{prob_sigma:.1f}°C kullanıldı.")
     if metar is not None:
         bullets.append(f"Son METAR {metar.temperature_c:.0f}/{metar.dew_point_c:.0f}°C ve rüzgâr {metar.wind_direction_deg or 'VRB'}°/{metar.wind_speed_kt:.0f} kt.")
-    for name in ("live_observation", "cloud_radiation", "rain_soil", "advection"):
+    for name in ("live_observation", "synoptic_pressure", "cloud_radiation", "rain_soil", "advection"):
         adj = next((item for item in adjustments if item.name == name), None)
         if adj and adj.summary and len(bullets) < 6:
             bullets.append(f"{adj.summary}; etki {adj.value_c:+.1f}°C.")
@@ -256,6 +258,7 @@ def _risks(
     rain = next((item for item in adjustments if item.name == "rain_soil"), None)
     advection = next((item for item in adjustments if item.name == "advection"), None)
     live = next((item for item in adjustments if item.name == "live_observation"), None)
+    synoptic = next((item for item in adjustments if item.name == "synoptic_pressure"), None)
     upward_parts: list[str] = []
     downward_parts: list[str] = []
     critical_parts: list[str] = []
@@ -265,18 +268,27 @@ def _risks(
         upward_parts.append(f"yüksek radyasyon/düşük bulut ({cloud.summary})")
     if live and live.value_c > 0.7:
         upward_parts.append(f"canlı gözlem model patikasından sıcak ({live.summary})")
+    if synoptic and synoptic.value_c > 0.2:
+        upward_parts.append(f"yükselen basınç/sıcak üst seviye ({synoptic.summary})")
     if cloud and cloud.value_c < -0.7:
         downward_parts.append(f"radyasyon baskısı yüksek ({cloud.summary})")
     if rain and rain.value_c < -0.5:
         downward_parts.append(f"yağış/zemin soğutması belirgin ({rain.summary})")
     if live and live.value_c < -0.7:
         downward_parts.append(f"canlı gözlem model patikasından serin ({live.summary})")
+    if synoptic and synoptic.value_c < -0.3:
+        downward_parts.append(f"düşen basınç/serin üst seviye ({synoptic.summary})")
     if spread is not None and spread > 1.5:
         critical_parts.append("model/ensemble ayrışması yüksek")
     if spread is None:
         critical_parts.append("model ayrışması hesaplanamadı")
     if taf and taf.rain_or_storm_risk:
         critical_parts.append("konvektif yağış zamanlaması")
+    if synoptic and synoptic.inputs.get("pressure_trend_hpa") is not None:
+        pressure_trend = float(synoptic.inputs["pressure_trend_hpa"])
+        cape_max = synoptic.inputs.get("midday_cape_max_jkg")
+        if pressure_trend <= -3.0 and cape_max is not None and float(cape_max) >= 700.0:
+            critical_parts.append("düşen basınç + CAPE konveksiyon riski")
     upward = "; ".join(upward_parts) if upward_parts else "Belirgin yukarı risk sinyali yok"
     downward = "; ".join(downward_parts) if downward_parts else "Belirgin aşağı risk sinyali yok"
     critical = "; ".join(critical_parts) if critical_parts else "Belirgin kritik belirsizlik sinyali yok"
