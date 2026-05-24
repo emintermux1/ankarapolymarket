@@ -63,6 +63,9 @@ class TelegramReportRenderer:
                 "Canlı gözlem:",
                 *self._metar_lines(metar, include_raw=False),
                 "",
+                "🚨 YUVARLAMA ALARMI:",
+                *self._rounding_alarm_lines(analysis, metar, taf),
+                "",
                 "Model tahminleri:",
                 *self._model_lines(model_bundle, analysis, previous_model_tmax_c),
                 "",
@@ -454,6 +457,58 @@ class TelegramReportRenderer:
         lines.append(_bullet("Not: Yatırım tavsiyesi değildir; manuel karar sende."))
         return lines
 
+    def _rounding_alarm_lines(
+        self,
+        analysis: ForecastAnalysis,
+        metar: METARNormalized | None,
+        taf: TAFNormalized | None,
+    ) -> list[str]:
+        reference_c = metar.temperature_c if metar is not None else analysis.final_tmax_c
+        if reference_c is None:
+            return [
+                _bullet("Market kaderi 0.5°C yuvarlama sınırlarında; anlık/final sıcaklık verisi yok."),
+                _bullet("Veri Kaynağı Kritik Eşikleri: canlı METAR gelince hesaplanacak."),
+                _bullet("Kritik Saat Kırılımı (13:30 - 15:30): METAR/TAF verisi yok."),
+            ]
+
+        market_boundary_c = _next_market_rounding_boundary_c(reference_c)
+        current_f = _c_to_f(reference_c)
+        next_f = math.floor(current_f) + 1
+        next_f_c = _f_to_c(next_f)
+        delta_to_next_f_c = max(0.0, next_f_c - reference_c)
+        rounded_c = _settlement_integer_from_reported_temp(market_boundary_c)
+        return [
+            _bullet(
+                f"Marketin kaderi {market_boundary_c:.1f}°C sınırında. "
+                f"{market_boundary_c:.1f}°C vurursa sistem bunu {rounded_c}°C tescil eder."
+            ),
+            _bullet(f"{market_boundary_c:.1f}°C = {rounded_c}°C; pozisyon aslında tam sayı değil, yarım derece eşiğine oynar."),
+            "📊 Veri Kaynağı Kritik Eşikleri:",
+            _bullet(f"Anlık değer: {reference_c:.1f}°C ({current_f:.0f}°F)"),
+            _bullet(
+                f"Sonraki Wunderground tam-F eşiği: {next_f:.0f}°F "
+                f"({_fmt_floor_2(next_f_c)}°C) için +{_fmt_floor_2(delta_to_next_f_c)}°C gerekiyor."
+            ),
+            "🎯 Kritik Saat Kırılımı (13:30 - 15:30):",
+            *self._critical_hour_lines(analysis.target_date, metar, taf),
+        ]
+
+    def _critical_hour_lines(
+        self,
+        target_date: date,
+        metar: METARNormalized | None,
+        taf: TAFNormalized | None,
+    ) -> list[str]:
+        period = _taf_period_for_window(taf, target_date, self.tz)
+        wind_direction = period.wind_direction_deg if period and period.wind_direction_deg is not None else (metar.wind_direction_deg if metar else None)
+        wind_speed = period.wind_speed_kt if period and period.wind_speed_kt is not None else (metar.wind_speed_kt if metar else None)
+        clouds = period.clouds if period and period.clouds else (metar.cloud_layers if metar else [])
+        return [
+            _bullet(f"Pik saat rüzgâr tahmini: {_format_wind(wind_direction, wind_speed)} -> {_wind_thermal_effect(wind_direction)}"),
+            _bullet(f"Gökyüzü kapalılığı (Oktas): {_cloud_cover_alarm_label(clouds)}"),
+            _bullet(f"METAR trend analizi: {_metar_trend_label(metar)}"),
+        ]
+
     def _data_quality_lines(
         self,
         target_date: date,
@@ -790,6 +845,80 @@ def _expected_profit_usd(stake_usd: float, fair_probability: float, yes_price: f
 
 def _settlement_integer_from_reported_temp(value: float) -> int:
     return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)
+
+
+def _next_market_rounding_boundary_c(value_c: float) -> float:
+    integer_part = math.floor(value_c)
+    boundary = integer_part + 0.5
+    if value_c < boundary:
+        return boundary
+    return integer_part + 1.5
+
+
+def _c_to_f(value_c: float) -> float:
+    return value_c * 9 / 5 + 32
+
+
+def _f_to_c(value_f: float) -> float:
+    return (value_f - 32) * 5 / 9
+
+
+def _fmt_floor_2(value: float) -> str:
+    return f"{math.floor(value * 100) / 100:.2f}"
+
+
+def _taf_period_for_window(taf: TAFNormalized | None, target_date: date, tz: ZoneInfo) -> object | None:
+    if taf is None:
+        return None
+    window_start = datetime.combine(target_date, time(13, 30), tzinfo=tz)
+    window_end = datetime.combine(target_date, time(15, 30), tzinfo=tz)
+    for period in taf.periods:
+        period_start = period.time_from.astimezone(tz)
+        period_end = period.time_to.astimezone(tz)
+        if period_start <= window_end and period_end >= window_start:
+            return period
+    return None
+
+
+def _format_wind(direction_deg: int | None, speed_kt: float | None) -> str:
+    direction = f"{direction_deg:03d}°" if direction_deg is not None else "VRB"
+    speed = f"{speed_kt:.0f} KT" if speed_kt is not None else "veri yok"
+    return f"{direction} / {speed}"
+
+
+def _wind_thermal_effect(direction_deg: int | None) -> str:
+    if direction_deg is None:
+        return "rüzgâr yönü belirsiz"
+    if direction_deg <= 80 or direction_deg >= 320:
+        return "kuzeyli akış ısınmayı baskılayacak"
+    if 240 <= direction_deg <= 300:
+        return "batı rüzgârı pist/asfalt ısısını +0.4°C yukarı taşıyabilir"
+    if 160 <= direction_deg <= 230:
+        return "güneybatılı akış yukarı risk yaratır"
+    return "termal etki nötr"
+
+
+def _cloud_cover_alarm_label(clouds: list[dict]) -> str:
+    if not clouds:
+        return "veri yok"
+    covers = [str(cloud.get("cover") or "").upper() for cloud in clouds]
+    primary = next((cover for cover in covers if cover), "veri yok")
+    if any(cover in {"BKN", "OVC"} for cover in covers):
+        return f"{primary} (güneşlenme kısıtlı)"
+    if any(cover in {"FEW", "SCT"} for cover in covers):
+        return f"{primary} (güneşlenme açık)"
+    return primary
+
+
+def _metar_trend_label(metar: METARNormalized | None) -> str:
+    if metar is None or not metar.raw_text:
+        return "veri yok"
+    raw = metar.raw_text.upper()
+    if "NOSIG" in raw:
+        return "NOSIG (değişim beklenmiyor)"
+    if "TEMPO" in raw or "BECMG" in raw:
+        return "değişim sinyali var"
+    return "trend kodu yok"
 
 
 def _nearest_settlement_integer(value: float | None) -> int | None:

@@ -15,6 +15,7 @@ from src.data_sources.schemas import (
     ModelBundle,
     ModelForecast,
     ModelHourlyPoint,
+    round_market_temperature_c,
 )
 from src.forecast.ai_effect_analysis import calculate_ai_effect_analysis
 from src.forecast.confidence import calculate_confidence
@@ -128,6 +129,12 @@ def test_market_fair_probabilities_use_integer_brackets() -> None:
     probabilities = _fair_probabilities(18.2, 0.8, market)
     assert probabilities["18°C"] > probabilities["19°C"]
     assert probabilities["23°C or higher"] < 0.01
+
+
+def test_market_temperature_rounding_half_up() -> None:
+    assert round_market_temperature_c(20.49) == 20
+    assert round_market_temperature_c(20.5) == 21
+    assert round_market_temperature_c(21.5) == 22
 
 
 def test_synoptic_pressure_adjustment_uses_pressure_trend_and_upper_air() -> None:
@@ -263,3 +270,30 @@ def test_ltac_westerly_microclimate_adds_runway_bias() -> None:
     assert microclimate.value_c == 0.4
     assert "batı rüzgârı" in microclimate.summary
     assert analysis.final_tmax_c == 24.8
+
+
+def test_ltac_microclimate_uses_metar_westerly_wind_for_asphalt_offset() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    engine = LTACForecastEngine(settings)
+    target = date(2026, 5, 24)
+    metar = METARNormalized(
+        fetch_timestamp=datetime.now(timezone.utc),
+        observation_time=datetime.now(timezone.utc),
+        temperature_c=20.0,
+        dew_point_c=8.0,
+        wind_direction_deg=270,
+        wind_speed_kt=12,
+        raw_text="LTAC 241200Z 27012KT 9999 BKN040 20/08 Q1016 NOSIG",
+    )
+    bundle = ModelBundle(
+        fetch_timestamp=datetime.now(timezone.utc),
+        target_date=target,
+        forecasts=[ModelForecast(model="ecmwf_ifs025", available=True, target_date=target, tmax_c=20.0)],
+    )
+
+    analysis = engine.run(target_date=target, metar=metar, taf=None, model_bundle=bundle, market=None, historical_weights={})
+
+    microclimate = next(item for item in analysis.adjustments if item.name == "ltac_microclimate")
+    assert microclimate.value_c == 0.4
+    assert microclimate.inputs["metar_wind_direction_deg"] == 270
+    assert analysis.final_tmax_c == 20.4
