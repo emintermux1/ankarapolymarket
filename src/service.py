@@ -8,12 +8,14 @@ from zoneinfo import ZoneInfo
 from src.config import Settings
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.havaforum import HavaForumScraper
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.schemas import (
     ActualResult,
     ForecastAnalysis,
+    ForumAnalysis,
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
@@ -37,6 +39,7 @@ class ForecastContext:
     taf: TAFNormalized | None
     model_bundle: ModelBundle | None
     market: MarketSnapshot | None
+    forum: ForumAnalysis | None
 
 
 class ForecastService:
@@ -51,6 +54,7 @@ class ForecastService:
         self.polymarket = PolymarketAviationReader(settings)
         self.iem = IEMASOSAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
+        self.havaforum = HavaForumScraper(settings)
         self.engine = LTACForecastEngine(settings)
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
@@ -60,11 +64,12 @@ class ForecastService:
 
     async def build_forecast_context(self, target_date: date | None = None, report_label: str = "manual") -> ForecastContext:
         target = target_date or self.default_target_date()
-        metar, taf, bundle, market = await asyncio.gather(
+        metar, taf, bundle, market, forum = await asyncio.gather(
             self._safe_metar(),
             self._safe_taf(),
             self._safe_models(target),
             self._safe_market(target),
+            self._safe_forum(target),
         )
         if metar:
             self.repository.save_observation(metar)
@@ -83,7 +88,7 @@ class ForecastService:
             historical_weights=historical_weights,
         )
         self.repository.save_forecast_analysis(analysis, report_label=report_label)
-        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market)
+        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market, forum=forum)
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
@@ -93,9 +98,15 @@ class ForecastService:
             taf=ctx.taf,
             model_bundle=ctx.model_bundle,
             market=ctx.market,
+            forum=ctx.forum,
             report_label=report_label,
         )
         return report
+
+    async def render_forum(self, target_date: date | None = None) -> str:
+        target = target_date or self.default_target_date()
+        forum = await self._safe_forum(target)
+        return self.renderer.forum_report(forum)
 
     async def render_now(self) -> str:
         metar = await self._safe_metar()
@@ -177,6 +188,7 @@ class ForecastService:
             self.polymarket.health(),
             self.iem.health(),
             self.wunderground.health(),
+            self.havaforum.health(),
         )
         for item in health:
             self.repository.save_source_health(item)
@@ -238,5 +250,11 @@ class ForecastService:
     async def _safe_market(self, target_date: date) -> MarketSnapshot | None:
         try:
             return await self.polymarket.get_market(target_date)
+        except Exception:
+            return None
+
+    async def _safe_forum(self, target_date: date) -> ForumAnalysis | None:
+        try:
+            return await self.havaforum.get_analysis(target_date)
         except Exception:
             return None
