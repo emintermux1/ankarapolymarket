@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date
+from datetime import date, datetime
+from html import escape
 from zoneinfo import ZoneInfo
 
 from src.config import Settings
@@ -32,52 +33,235 @@ class TelegramReportRenderer:
         report_label: str | None = None,
         previous_analysis: ForecastAnalysis | None = None,
         previous_model_tmax_c: Mapping[str, float | None] | None = None,
+        temperature_momentum: tuple[float, int] | None = None,
     ) -> str:
         report_time = analysis.generated_at.astimezone(self.tz)
+        boundary = _boundary_risk(analysis)
         return "\n".join(
             [
-                _report_title(report_label),
+                f"{_weather_emoji(model_bundle, taf)} Ankara Esenboğa Günün Tahmini",
                 "",
-                f"Tarih: {analysis.target_date.isoformat()}",
-                f"Rapor saati: {report_time:%H:%M} ({self.settings.report_timezone})",
-                "Lokasyon: Ankara Esenboğa / LTAC",
+                self._market_headline(market),
                 "",
-                "Özet:",
-                _bullet(
-                    f"Beklenen maksimum: {_fmt_c_with_trend(analysis.final_tmax_c, previous_analysis.final_tmax_c if previous_analysis else None)}"
-                ),
-                _bullet(f"Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}"),
-                _bullet(f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})"),
-                _bullet(f"Sınır riski: {_boundary_risk(analysis)}"),
-                _bullet(f"Karar: {analysis.verdict}"),
+                f"📅 Market Kapanış: {self._market_close_text(market)}",
                 "",
-                "Veri kontrolü:",
-                *self._data_quality_lines(analysis.target_date, metar, taf, model_bundle, market),
+                f"👥 Bot Tahmini: {_fmt_c_with_trend(analysis.final_tmax_c, previous_analysis.final_tmax_c if previous_analysis else None)}",
+                f"⚠️ Risk {_risk_emoji(boundary)} {boundary}",
                 "",
-                "Canlı gözlem:",
-                *self._metar_lines(metar, include_raw=False),
+                "🕒 Saatlik Beklentiler",
+                *self._hourly_expectation_lines(model_bundle, temperature_momentum),
                 "",
-                "Model tahminleri:",
-                *self._model_lines(model_bundle, analysis, previous_model_tmax_c),
+                f"⚡ Tahmini Sonuç: {_fmt_integer_c(analysis.final_tmax_c)}",
+                f"├ Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}",
+                f"├ Son METAR: {self._metar_decoded(metar)}",
+                f"└ Gözlem zamanı: {_observation_time_text(metar, self.tz)}",
                 "",
-                "Hava dinamiği:",
-                *self._dynamic_lines(analysis),
+                "🤖 Model tahminleri:",
+                *self._rich_model_lines(model_bundle, analysis, previous_model_tmax_c),
                 "",
-                "Neden bu tahmin?",
-                *self._rationale_lines(analysis),
+                "👉 Meteorolojik Veriler",
+                *self._meteorological_data_lines(metar, model_bundle, analysis),
                 "",
-                "Market fiyatlaması:",
-                *self._market_lines(analysis, market),
+                f"{_weather_emoji(model_bundle, taf)} Bulut Aktiviteleri:",
+                *self._cloud_activity_lines(model_bundle, taf),
                 "",
-                "MANUEL BET ÖZETİ ($100 sabit)",
-                *self._manual_bet_lines(analysis, market),
+                "🧑‍🏫 İşe yarar Forum Analizi:",
+                "├ Forum/kullanıcı yorumu kaynağı bağlı değil; doğrulanmış yorum yok.",
+                "└ Link eklenirse burada kaynaklı forum sinyali gösterilecek.",
                 "",
-                "Riskler:",
-                f"Yukarı risk: {analysis.risks.get('upward', 'veri yok')}",
-                f"Aşağı risk: {analysis.risks.get('downward', 'veri yok')}",
-                f"En kritik belirsizlik: {analysis.risks.get('critical', 'veri yok')}",
+                "🤖 AI Özeti:",
+                *self._ai_summary_lines(analysis, market, model_bundle, metar),
+                "",
+                self._polymarket_price_line(analysis, market),
+                "",
+                f"⏳ Son Güncelleme: {report_time:%H:%M} ({self.settings.report_timezone})",
+                "⚠️ Yeni değişkenler / son değişiklikler:",
+                *self._change_lines(analysis, previous_analysis, temperature_momentum),
             ]
         )
+
+    def _market_headline(self, market: MarketSnapshot | None) -> str:
+        if market is None:
+            return "Polymarket marketi: ilgili market bulunamadı"
+        title = escape(market.title or "Polymarket Ankara marketi")
+        link = escape(market.link, quote=True)
+        headline = f'<a href="{link}">{title}</a>' if market.link else title
+        return f"{headline} · Vol: ${_fmt_num(market.volume)}"
+
+    def _market_close_text(self, market: MarketSnapshot | None) -> str:
+        if market is None:
+            return "veri yok"
+        close_time = _extract_market_close(market)
+        if close_time is not None:
+            return f"{close_time.astimezone(self.tz):%b %-d %-H:%M} Türkiye saati"
+        if market.target_date is not None:
+            return f"{market.target_date:%b %-d} kapanış saati veri yok"
+        return "veri yok"
+
+    def _hourly_expectation_lines(self, bundle: ModelBundle | None, temperature_momentum: tuple[float, int] | None) -> list[str]:
+        hourly = _hourly_temperature_averages(bundle)
+        lines: list[str] = []
+        peak_hour = max(hourly, key=hourly.get) if hourly else None
+        for hour in (9, 11, 13, 15):
+            value = hourly.get(hour)
+            suffix = " peak" if peak_hour == hour else ""
+            arrow = "→ " if hour >= 13 else ""
+            lines.append(f"├ {hour}:00 {arrow}{_fmt_c(value)}{suffix}")
+        lines.append(f"├ 17:00 → {_cloud_trend_text(bundle, 17)}")
+        lines.append(f"├ 19:00 → {_cooling_text(hourly, 19)}")
+        lines.append("├ Sıcaklık Momentum")
+        if temperature_momentum is None:
+            lines.extend(["│  Son 90 dk: veri yok", "└ → Momentum ölçümü için geçmiş METAR yok"])
+            return lines
+        delta, minutes = temperature_momentum
+        direction = "artış" if delta > 0.05 else "düşüş" if delta < -0.05 else "yatay"
+        strength = "Güçlü momentum" if abs(delta) >= 1.5 else "Orta momentum" if abs(delta) >= 0.6 else "Zayıf/yatay momentum"
+        arrow = "↗" if delta > 0.05 else "↘" if delta < -0.05 else "→"
+        lines.extend([f"│  Son {minutes} dk:", f"│  {delta:+.1f}°C {direction}", f"└ {arrow} {strength}"])
+        return lines
+
+    def _metar_decoded(self, metar: METARNormalized | None) -> str:
+        if metar is None:
+            return "METAR verisi yok"
+        wind = f"{metar.wind_direction_deg if metar.wind_direction_deg is not None else 'VRB'}°/{metar.wind_speed_kt:.0f} kt"
+        gust = f", hamle {metar.wind_gust_kt:.0f} kt" if metar.wind_gust_kt is not None else ""
+        pressure = f", basınç {metar.pressure_hpa:.0f} hPa" if metar.pressure_hpa is not None else ""
+        return (
+            f"{metar.station}: canlı hava {_fmt_c(metar.temperature_c)}, çiğ noktası {_fmt_c(metar.dew_point_c)}, "
+            f"rüzgâr {wind}{gust}{pressure}. Isınma verimi çiğ noktası/rüzgâr ve bulutla birlikte değerlendiriliyor."
+        )
+
+    def _rich_model_lines(
+        self,
+        bundle: ModelBundle | None,
+        analysis: ForecastAnalysis | None = None,
+        previous_model_tmax_c: Mapping[str, float | None] | None = None,
+    ) -> list[str]:
+        if bundle is None:
+            return ["└ Model verisi yok"]
+        lines = []
+        for forecast in bundle.forecasts:
+            label = _model_link(forecast.model)
+            previous_tmax = previous_model_tmax_c.get(forecast.model) if previous_model_tmax_c else None
+            value = _fmt_c_with_trend(forecast.tmax_c, previous_tmax) if forecast.available else "unavailable"
+            weight = ""
+            if analysis and forecast.model in analysis.model_weights:
+                weight = f" (ağırlık %{analysis.model_weights[forecast.model] * 100:.0f})"
+            lines.append(f"├ {label}: {value}{weight}")
+        values = [forecast.tmax_c for forecast in bundle.available_forecasts if forecast.tmax_c is not None]
+        if values:
+            lines.append(f"└ Model aralığı: {min(values):.1f}°C - {max(values):.1f}°C")
+        else:
+            lines.append("└ Model aralığı: veri yok")
+        return lines
+
+    def _meteorological_data_lines(
+        self,
+        metar: METARNormalized | None,
+        bundle: ModelBundle | None,
+        analysis: ForecastAnalysis,
+    ) -> list[str]:
+        precip_probability, precip_mm = _precipitation_summary(bundle)
+        dew_point = metar.dew_point_c if metar else _hourly_average(bundle, "dew_point_2m_c")
+        humidity = metar.relative_humidity if metar and metar.relative_humidity is not None else _hourly_average(bundle, "relative_humidity_pct")
+        cape = _hourly_max(bundle, "cape_jkg")
+        pressure = metar.pressure_hpa if metar and metar.pressure_hpa is not None else _hourly_average(bundle, "pressure_msl_hpa")
+        wind = _wind_text(metar, bundle)
+        synoptic = _adjustment(analysis, "synoptic_pressure")
+        advection = _adjustment(analysis, "advection")
+        return [
+            f"├ Canlı sıcaklık: {_fmt_c(metar.temperature_c if metar else None)}",
+            f"├ Yağış olasılığı: {_fmt_pct(precip_probability)}",
+            f"├ Yağış milimetresi: {_fmt_num(precip_mm)} mm",
+            f"├ Çiğ noktası: {_fmt_c(dew_point)}",
+            f"├ Nem: {_fmt_humidity(humidity)}",
+            "├ LI / TT: veri kaynağı bağlı değil; kararsızlık CAPE, basınç trendi ve TAF CB/TS sinyaliyle izleniyor.",
+            f"├ Radyasyon sisi / inversiyon: {_inversion_text(metar, bundle)}",
+            f"├ Topografik rüzgârlar: {_topographic_wind_text(metar, bundle)}",
+            "├ CIN: veri kaynağı bağlı değil; CAPE yüksek ama tetikleyici zayıfsa konveksiyon bastırılmış kabul edilir.",
+            f"├ CAPE: {_cape_text(cape)}",
+            f"├ Rüzgâr: {wind}",
+            f"├ Basınç: {_pressure_text(pressure, synoptic)}",
+            f"└ Sıcaklık Adveksiyonu: {escape(advection.summary) if advection else 'veri yok'}",
+        ]
+
+    def _cloud_activity_lines(self, bundle: ModelBundle | None, taf: TAFNormalized | None) -> list[str]:
+        low = _hourly_average(bundle, "cloud_cover_low_pct")
+        mid = _hourly_average(bundle, "cloud_cover_mid_pct")
+        high = _hourly_average(bundle, "cloud_cover_high_pct")
+        total = _hourly_average(bundle, "cloud_cover_pct")
+        precip_probability, _ = _precipitation_summary(bundle)
+        rain_text = "Yağmur yüklü bulutlar ağırlıklı" if (precip_probability or 0.0) >= 0.35 or bool(taf and taf.rain_or_storm_risk) else "Yağış yüklü bulut sinyali zayıf"
+        return [
+            f"├ {rain_text}",
+            f"├ Bulut yönü: {_cloud_direction_text(bundle)}",
+            f"├ Bulut sayısı / kapalılık: {_fmt_pct_from_0_100(total)}",
+            f"├ Tahmini açılma zamanı: {_clearing_time_text(bundle)}",
+            f"└ Alçak/orta/yüksek bulutlar: alçak {_fmt_pct_from_0_100(low)}, orta {_fmt_pct_from_0_100(mid)}, yüksek {_fmt_pct_from_0_100(high)}",
+        ]
+
+    def _ai_summary_lines(
+        self,
+        analysis: ForecastAnalysis,
+        market: MarketSnapshot | None,
+        bundle: ModelBundle | None,
+        metar: METARNormalized | None,
+    ) -> list[str]:
+        candidate = _best_market_candidate(analysis, market)
+        model_values = [forecast.tmax_c for forecast in (bundle.available_forecasts if bundle else []) if forecast.tmax_c is not None]
+        model_summary = (
+            f"Modeller {min(model_values):.1f}-{max(model_values):.1f}°C bandında; bot merkezi {_fmt_c(analysis.final_tmax_c)}."
+            if model_values
+            else "Model tarafında yeterli veri yok; güven skoru aşağı çekiliyor."
+        )
+        metar_summary = (
+            f"Canlı METAR {_fmt_c(metar.temperature_c)} ve çiğ noktası {_fmt_c(metar.dew_point_c)}; gün içi tavanı rüzgâr/bulut belirleyecek."
+            if metar
+            else "Canlı METAR yok; rapor model ağırlığıyla çalışıyor."
+        )
+        market_summary = (
+            f"En güçlü fiyat/fair ayrışması {candidate[1]} için {_fmt_pp(candidate[0])}."
+            if candidate and candidate[0] >= 0.05
+            else "Piyasa tarafında net pozitif edge sinyali yok."
+        )
+        return [
+            f"├ {escape(model_summary)}",
+            f"├ {escape(metar_summary)}",
+            f"├ {escape(market_summary)}",
+            f"├ Net karar: {_fmt_integer_c(analysis.final_tmax_c)} merkezi izlenir.",
+            "└ Not: Yatırım tavsiyesi değildir.",
+        ]
+
+    def _polymarket_price_line(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> str:
+        candidate = _best_market_candidate(analysis, market)
+        if candidate is None:
+            return "💵 Polymarket Canlı Fiyat: veri yok"
+        _, bracket, _, implied = candidate
+        movement = _recent_trade_movement(market, bracket) if market else None
+        if movement is None:
+            return f"💵 Polymarket Canlı Fiyat ({escape(bracket)}): {_fmt_cents(implied)}"
+        icon = "🟢" if movement > 0 else "🔴" if movement < 0 else "🟡"
+        return f"💵 Polymarket Canlı Fiyat ({escape(bracket)}): {_fmt_cents(implied)} {icon} (son işlemlerde {movement * 100:+.1f} pp)"
+
+    def _change_lines(
+        self,
+        analysis: ForecastAnalysis,
+        previous_analysis: ForecastAnalysis | None,
+        temperature_momentum: tuple[float, int] | None,
+    ) -> list[str]:
+        lines: list[str] = []
+        if previous_analysis and analysis.final_tmax_c is not None and previous_analysis.final_tmax_c is not None:
+            delta = analysis.final_tmax_c - previous_analysis.final_tmax_c
+            lines.append(f"├ Tahmin değişimi: {_trend_text(delta)}")
+        else:
+            lines.append("├ Tahmin değişimi: önceki rapor yok")
+        if temperature_momentum is not None:
+            lines.append(f"├ Canlı momentum: {_trend_text(temperature_momentum[0])}")
+        if analysis.model_spread_c is not None:
+            lines.append(f"└ Model ayrışması: {analysis.model_spread_c:.1f}°C")
+        else:
+            lines.append("└ Model ayrışması: veri yok")
+        return lines
 
     def now_report(self, metar: METARNormalized | None) -> str:
         if metar is None:
@@ -420,6 +604,10 @@ def _fmt_c(value: float | None) -> str:
     return f"{value:.1f}°C" if value is not None else "veri yok"
 
 
+def _fmt_integer_c(value: float | None) -> str:
+    return f"{round(value):.0f}°C" if value is not None else "veri yok"
+
+
 def _fmt_c_with_trend(value: float | None, previous: float | None) -> str:
     text = _fmt_c(value)
     if value is None or previous is None:
@@ -440,6 +628,14 @@ def _fmt_num(value: float | int | None) -> str:
 
 def _fmt_pct(value: float | None) -> str:
     return f"{value * 100:.1f}%" if value is not None else "veri yok"
+
+
+def _fmt_pct_from_0_100(value: float | None) -> str:
+    return f"%{value:.0f}" if value is not None else "veri yok"
+
+
+def _fmt_humidity(value: float | int | None) -> str:
+    return f"%{value:.0f}" if value is not None else "veri yok"
 
 
 def _fmt_cents(value: float | None) -> str:
@@ -488,6 +684,266 @@ def _format_clouds(clouds: list[dict]) -> str:
     if not clouds:
         return "veri yok"
     return ", ".join(f"{cloud.get('cover', '?')}{cloud.get('base', '')}" for cloud in clouds)
+
+
+def _weather_emoji(bundle: ModelBundle | None, taf: TAFNormalized | None) -> str:
+    precip_probability, precip_mm = _precipitation_summary(bundle)
+    cloud = _hourly_average(bundle, "cloud_cover_pct")
+    cape = _hourly_max(bundle, "cape_jkg")
+    if (cape or 0.0) >= 700.0 or bool(taf and taf.rain_or_storm_risk):
+        return "🌩️"
+    if (precip_mm or 0.0) >= 1.0:
+        return "🌧️"
+    if (precip_probability or 0.0) >= 0.25:
+        return "🌦️"
+    if cloud is None:
+        return "☁️"
+    if cloud >= 80.0:
+        return "☁️"
+    if cloud >= 55.0:
+        return "🌥️"
+    if cloud >= 30.0:
+        return "⛅️"
+    return "🌤️"
+
+
+def _risk_emoji(boundary: str) -> str:
+    return {"YÜKSEK": "🔴", "ORTA": "🟡", "DÜŞÜK": "🟢"}.get(boundary, "⚪️")
+
+
+def _extract_market_close(market: MarketSnapshot) -> datetime | None:
+    for key in ("endDate", "endDateIso", "closedTime", "closeTime", "resolutionDate"):
+        value = market.raw_json.get(key)
+        if not value:
+            continue
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+    return None
+
+
+def _hourly_temperature_averages(bundle: ModelBundle | None) -> dict[int, float]:
+    hourly: dict[int, list[float]] = {}
+    if bundle is None:
+        return {}
+    for forecast in bundle.available_forecasts:
+        for point in forecast.hourly:
+            if point.temperature_2m_c is not None:
+                hourly.setdefault(point.time.hour, []).append(point.temperature_2m_c)
+    return {hour: sum(values) / len(values) for hour, values in hourly.items() if values}
+
+
+def _hourly_average(bundle: ModelBundle | None, field: str, start_hour: int = 10, end_hour: int = 15) -> float | None:
+    values = []
+    if bundle is None:
+        return None
+    for forecast in bundle.available_forecasts:
+        for point in forecast.hourly:
+            if start_hour <= point.time.hour <= end_hour:
+                value = getattr(point, field)
+                if value is not None:
+                    values.append(float(value))
+    return sum(values) / len(values) if values else None
+
+
+def _hourly_max(bundle: ModelBundle | None, field: str, start_hour: int = 10, end_hour: int = 15) -> float | None:
+    values = []
+    if bundle is None:
+        return None
+    for forecast in bundle.available_forecasts:
+        for point in forecast.hourly:
+            if start_hour <= point.time.hour <= end_hour:
+                value = getattr(point, field)
+                if value is not None:
+                    values.append(float(value))
+    return max(values) if values else None
+
+
+def _precipitation_summary(bundle: ModelBundle | None) -> tuple[float | None, float | None]:
+    totals = []
+    if bundle is None:
+        return None, None
+    for forecast in bundle.available_forecasts:
+        total = sum(point.precipitation_mm or 0.0 for point in forecast.hourly)
+        totals.append(total)
+    if not totals:
+        return None, None
+    probability = sum(1 for total in totals if total >= 0.2) / len(totals)
+    return probability, sum(totals) / len(totals)
+
+
+def _cloud_trend_text(bundle: ModelBundle | None, hour: int) -> str:
+    cloud = _hourly_average(bundle, "cloud_cover_pct", hour, hour)
+    if cloud is None:
+        return "bulut verisi yok"
+    if cloud >= 70.0:
+        return "Bulut artışı"
+    if cloud <= 30.0:
+        return "Hava açıyor"
+    return "Parçalı bulut"
+
+
+def _cooling_text(hourly: dict[int, float], hour: int) -> str:
+    value = hourly.get(hour)
+    afternoon = hourly.get(15) or hourly.get(14)
+    if value is None:
+        return "Soğuma verisi yok"
+    if afternoon is not None and value < afternoon - 0.4:
+        return "Soğuma başlangıcı"
+    return f"{_fmt_c(value)} civarı"
+
+
+def _observation_time_text(metar: METARNormalized | None, tz: ZoneInfo) -> str:
+    if metar is None:
+        return "veri yok"
+    return f"{metar.observation_time.astimezone(tz):%H:%M}"
+
+
+def _model_link(model: str) -> str:
+    label = _display_model_name(model)
+    lowered = model.lower()
+    if "ecmwf" in lowered:
+        url = "https://www.ecmwf.int/en/forecasts"
+    elif "gfs" in lowered:
+        url = "https://www.ncei.noaa.gov/products/weather-climate-models/global-forecast"
+    elif "icon" in lowered:
+        url = "https://www.dwd.de/EN/ourservices/nwp_forecast_data/nwp_forecast_data.html"
+    elif "visual" in lowered:
+        url = "https://www.visualcrossing.com/weather-api/"
+    elif "tomorrow" in lowered:
+        url = "https://www.tomorrow.io/weather-api/"
+    else:
+        url = "https://open-meteo.com/en/docs"
+    return f'<a href="{escape(url, quote=True)}">{escape(label)}</a>'
+
+
+def _wind_text(metar: METARNormalized | None, bundle: ModelBundle | None) -> str:
+    if metar is not None:
+        direction = metar.wind_direction_deg if metar.wind_direction_deg is not None else "VRB"
+        base = f"{direction}° / {metar.wind_speed_kt:.0f} KT"
+        if metar.wind_speed_kt >= 15.0:
+            return f"{base}; kuvvetli karışım, ısınmayı yüzeye taşır ama rüzgâr soğutması artar."
+        if metar.wind_speed_kt <= 4.0:
+            return f"{base}; zayıf rüzgâr, inversiyon/sis riski ve yavaş karışım."
+        return f"{base}; orta seviye karışım, sıcaklık tavanı için nötr/sağlıklı."
+    speed = _hourly_average(bundle, "wind_speed_10m_kt")
+    direction = _hourly_average(bundle, "wind_direction_10m_deg")
+    if speed is None:
+        return "veri yok"
+    return f"{direction:.0f}° / {speed:.0f} KT model ort.; canlı METAR yok."
+
+
+def _inversion_text(metar: METARNormalized | None, bundle: ModelBundle | None) -> str:
+    temp_850 = _hourly_average(bundle, "temperature_850hpa_c", 6, 10)
+    surface = metar.temperature_c if metar is not None else _hourly_average(bundle, "temperature_2m_c", 6, 10)
+    if temp_850 is None or surface is None:
+        return "850 hPa/yüzey farkı veri yok"
+    diff = surface - temp_850
+    if diff < 1.5:
+        return f"yüzey-850 hPa farkı {diff:.1f}°C; inversiyon/radyasyon sisi riski yüksek."
+    if diff < 4.0:
+        return f"yüzey-850 hPa farkı {diff:.1f}°C; zayıf inversiyon ihtimali var."
+    return f"yüzey-850 hPa farkı {diff:.1f}°C; karışım daha iyi, sis riski sınırlı."
+
+
+def _topographic_wind_text(metar: METARNormalized | None, bundle: ModelBundle | None) -> str:
+    speed = metar.wind_speed_kt if metar is not None else _hourly_average(bundle, "wind_speed_10m_kt")
+    direction = metar.wind_direction_deg if metar is not None else _hourly_average(bundle, "wind_direction_10m_deg")
+    if speed is None:
+        return "rüzgâr verisi yok"
+    if speed <= 5.0:
+        return "zayıf rüzgâr; gece/vadi drenajı ve pist çevresi ani yön değişimi daha olası."
+    if direction is not None and (float(direction) >= 300 or float(direction) <= 60):
+        return "kuzey sektörlü akış; Çubuk Ovası boyunca serin/kurutucu kanal etkisi izlenir."
+    return "belirgin katabatik/anabatik alarm yok; yön ve hamleler METAR ile izleniyor."
+
+
+def _cape_text(value: float | None) -> str:
+    if value is None:
+        return "veri yok; konvektif enerji hesaplanamadı."
+    if value >= 1000.0:
+        return f"{value:.0f} J/kg; CB/oraj ve ani yağış riski yüksek."
+    if value >= 400.0:
+        return f"{value:.0f} J/kg; tetikleyici gelirse konveksiyon mümkün."
+    return f"{value:.0f} J/kg; dikey enerji zayıf, fırtına riski sınırlı."
+
+
+def _pressure_text(value: float | None, synoptic: object | None) -> str:
+    if value is None:
+        return "veri yok"
+    trend = None
+    if synoptic is not None:
+        trend = synoptic.inputs.get("pressure_trend_hpa")
+    trend_text = ""
+    if trend is not None:
+        trend = float(trend)
+        if trend <= -1.5:
+            trend_text = "; düşüş konveksiyon/bulut riskini artırır"
+        elif trend >= 1.5:
+            trend_text = "; yükseliş daha stabil/açık hava lehine"
+        else:
+            trend_text = "; trend nötr"
+    return f"{value:.0f} hPa{trend_text}"
+
+
+def _cloud_direction_text(bundle: ModelBundle | None) -> str:
+    direction = _hourly_average(bundle, "wind_direction_850hpa_deg")
+    speed = _hourly_average(bundle, "wind_speed_850hpa_kt")
+    if direction is None:
+        return "veri yok"
+    suffix = f", {speed:.0f} kt üst seviye akış" if speed is not None else ""
+    return f"{direction:.0f}° yönlü taşıma{suffix}"
+
+
+def _clearing_time_text(bundle: ModelBundle | None) -> str:
+    if bundle is None:
+        return "veri yok"
+    hourly: dict[int, list[float]] = {}
+    for forecast in bundle.available_forecasts:
+        for point in forecast.hourly:
+            if point.cloud_cover_pct is not None:
+                hourly.setdefault(point.time.hour, []).append(point.cloud_cover_pct)
+    for hour in range(12, 21):
+        values = hourly.get(hour)
+        if values and sum(values) / len(values) <= 35.0:
+            return f"{hour}:00 civarı açılma sinyali"
+    return "gün içinde net açılma sinyali yok"
+
+
+def _adjustment(analysis: ForecastAnalysis, name: str) -> object | None:
+    return next((item for item in analysis.adjustments if item.name == name), None)
+
+
+def _recent_trade_movement(market: MarketSnapshot | None, bracket: str) -> float | None:
+    if market is None:
+        return None
+    outcome = next((item for item in market.outcomes if item.bracket == bracket), None)
+    if outcome is None or len(outcome.recent_trades) < 2:
+        return None
+    prices = []
+    for trade in outcome.recent_trades:
+        for key in ("price", "yes_price", "outcomePrice"):
+            value = trade.get(key)
+            if value is None:
+                continue
+            try:
+                prices.append(float(value))
+                break
+            except (TypeError, ValueError):
+                continue
+    if len(prices) < 2:
+        return None
+    return prices[0] - prices[-1]
+
+
+def _trend_text(delta: float) -> str:
+    if delta > 0.05:
+        return f"🔺 {delta:+.1f}°C"
+    if delta < -0.05:
+        return f"🔻 {delta:+.1f}°C"
+    return "→ yatay"
 
 
 def _adj(adjustment: object | None) -> str:

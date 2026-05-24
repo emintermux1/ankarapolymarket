@@ -41,6 +41,7 @@ class ForecastContext:
     market: MarketSnapshot | None
     previous_analysis: ForecastAnalysis | None = None
     previous_model_tmax_c: dict[str, float | None] | None = None
+    temperature_momentum: tuple[float, int] | None = None
 
 
 class ForecastService:
@@ -78,6 +79,7 @@ class ForecastService:
         if bundle:
             self.repository.save_model_bundle(bundle)
         self.repository.save_market_snapshot(market)
+        temperature_momentum = self.repository.temperature_momentum(metar) if metar else None
         historical_weights = self.repository.latest_model_weights(self.settings.openmeteo_models)
         analysis = self.engine.run(
             target_date=target,
@@ -98,6 +100,7 @@ class ForecastService:
             market=market,
             previous_analysis=previous_analysis,
             previous_model_tmax_c=previous_model_tmax_c,
+            temperature_momentum=temperature_momentum,
         )
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
@@ -111,6 +114,7 @@ class ForecastService:
             report_label=report_label,
             previous_analysis=ctx.previous_analysis,
             previous_model_tmax_c=ctx.previous_model_tmax_c,
+            temperature_momentum=ctx.temperature_momentum,
         )
         return report
 

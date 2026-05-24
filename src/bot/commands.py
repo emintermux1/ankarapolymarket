@@ -29,7 +29,7 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_allowed_chat(update, service):
         return
     target = _parse_date_arg(context.args) if context.args else None
-    await _reply_long(update, await service.render_daily_report(target_date=target, report_label="command"))
+    await _reply_long(update, await service.render_daily_report(target_date=target, report_label="command"), parse_mode="HTML")
 
 
 async def now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -163,13 +163,13 @@ async def _reply(update: Update, text: str) -> None:
         await update.effective_message.reply_text(text, link_preview_options=_DISABLE_LINK_PREVIEWS)
 
 
-async def _reply_long(update: Update, text: str) -> None:
+async def _reply_long(update: Update, text: str, parse_mode: str | None = None) -> None:
     if update.effective_message is None:
         return
     for chunk in _chunks(text, 3900):
         await update.effective_message.reply_text(
             chunk,
-            parse_mode=None,
+            parse_mode=parse_mode,
             link_preview_options=_DISABLE_LINK_PREVIEWS,
         )
 

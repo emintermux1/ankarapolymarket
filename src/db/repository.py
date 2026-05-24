@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import create_engine, desc, select
@@ -271,6 +271,22 @@ class Repository:
                 continue
             latest[row.model] = row.tmax_c if row.available else None
         return latest
+
+    def temperature_momentum(self, metar: METARNormalized) -> tuple[float, int] | None:
+        start = metar.observation_time - timedelta(minutes=120)
+        end = metar.observation_time - timedelta(minutes=60)
+        with self.session_factory() as session:
+            row = session.scalar(
+                select(Observation)
+                .where(Observation.observation_time >= start)
+                .where(Observation.observation_time <= end)
+                .order_by(desc(Observation.observation_time))
+                .limit(1)
+            )
+        if row is None:
+            return None
+        minutes = int(round((metar.observation_time - row.observation_time).total_seconds() / 60.0))
+        return round(metar.temperature_c - row.temperature_c, 1), minutes
 
     def latest_backtest_summary(self) -> list[dict[str, Any]]:
         with self.session_factory() as session:
