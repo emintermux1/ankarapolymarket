@@ -5,17 +5,20 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
+from src.config import Settings
 from src.data_sources.schemas import (
     EnsembleForecast,
     ForecastAdjustment,
     METARNormalized,
     MarketOutcome,
     MarketSnapshot,
+    ModelBundle,
     ModelForecast,
     ModelHourlyPoint,
 )
 from src.forecast.ai_effect_analysis import calculate_ai_effect_analysis
 from src.forecast.confidence import calculate_confidence
+from src.forecast.engine import LTACForecastEngine
 from src.forecast.engine import _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
 from src.forecast.nowcasting import calculate_nowcasting_signals
@@ -286,3 +289,39 @@ def _metar(observation_time: datetime, temperature_c: float) -> METARNormalized:
         wind_speed_kt=4,
         raw_text="METAR LTAC TEST",
     )
+
+
+def test_ltac_westerly_microclimate_adds_runway_bias() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    engine = LTACForecastEngine(settings)
+    target = date(2026, 5, 24)
+    hourly = [
+        ModelHourlyPoint(
+            time=datetime(2026, 5, 24, hour, tzinfo=timezone.utc),
+            temperature_2m_c=22.0 + hour / 10,
+            wind_direction_10m_deg=270,
+            cloud_cover_pct=20,
+            shortwave_radiation_wm2=780,
+        )
+        for hour in range(10, 15)
+    ]
+    bundle = ModelBundle(
+        fetch_timestamp=datetime.now(timezone.utc),
+        target_date=target,
+        forecasts=[
+            ModelForecast(
+                model="gfs_seamless",
+                available=True,
+                target_date=target,
+                hourly=hourly,
+                tmax_c=24.0,
+            )
+        ],
+    )
+
+    analysis = engine.run(target_date=target, metar=None, taf=None, model_bundle=bundle, market=None, historical_weights={})
+
+    microclimate = next(item for item in analysis.adjustments if item.name == "ltac_microclimate")
+    assert microclimate.value_c == 0.4
+    assert "batı rüzgârı" in microclimate.summary
+    assert analysis.final_tmax_c == 24.8

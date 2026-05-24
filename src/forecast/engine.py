@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timezone
+from statistics import mean
 
 from src.config import Settings
 from src.data_sources.schemas import (
@@ -140,12 +141,7 @@ class LTACForecastEngine:
             calculate_cloud_radiation_adjustment(forecasts),
             calculate_rain_soil_adjustment(taf, forecasts),
             calculate_ai_effect_analysis(metar, forecasts),
-            ForecastAdjustment(
-                name="ltac_microclimate",
-                value_c=0.0,
-                summary="LTAC plato/kırsal maruziyet etkisi geçmiş performansla kalibre edilecek; backtest olmadan sabit offset yok",
-                inputs={"elevation_m": self.settings.ltac_elevation_m},
-            ),
+            self._ltac_microclimate_adjustment(metar, forecasts),
             ForecastAdjustment(
                 name="uncertainty",
                 value_c=0.0,
@@ -153,6 +149,49 @@ class LTACForecastEngine:
                 inputs={},
             ),
         ]
+
+    def _ltac_microclimate_adjustment(
+        self,
+        metar: METARNormalized | None,
+        forecasts: list,
+    ) -> ForecastAdjustment:
+        avg_wind_dir = _surface_wind_direction(metar, forecasts)
+        sunshine_pct = _midday_sunshine_pct(forecasts)
+        inputs = {
+            "elevation_m": self.settings.ltac_elevation_m,
+            "avg_surface_wind_direction_deg": avg_wind_dir,
+            "midday_sunshine_pct": sunshine_pct,
+            "westerly_runway_bias_c": self.settings.ltac_westerly_runway_bias_c,
+        }
+        if avg_wind_dir is None:
+            return ForecastAdjustment(
+                name="ltac_microclimate",
+                value_c=0.0,
+                summary="LTAC pist/asfalt offseti için rüzgâr yönü verisi yok",
+                inputs=inputs,
+            )
+        if not 240 <= avg_wind_dir <= 300:
+            return ForecastAdjustment(
+                name="ltac_microclimate",
+                value_c=0.0,
+                summary=f"LTAC pist/asfalt offseti tetiklenmedi; ortalama rüzgâr {avg_wind_dir:.0f}°",
+                inputs=inputs,
+            )
+        if sunshine_pct is not None and sunshine_pct < 45:
+            return ForecastAdjustment(
+                name="ltac_microclimate",
+                value_c=0.0,
+                summary=f"batı rüzgârı var ama güneşlenme %{sunshine_pct:.0f}; asfalt offseti kapalı",
+                inputs=inputs,
+            )
+        value = round(float(self.settings.ltac_westerly_runway_bias_c), 2)
+        sunshine_text = f", güneşlenme %{sunshine_pct:.0f}" if sunshine_pct is not None else ""
+        return ForecastAdjustment(
+            name="ltac_microclimate",
+            value_c=value,
+            summary=f"Esenboğa batı rüzgârı + pist asfalt etkisi{sunshine_text}; LTAC sensör offseti",
+            inputs=inputs,
+        )
 
 
 def _extract_adjustment_input(adjustments: list[ForecastAdjustment], name: str, key: str) -> float | None:
@@ -258,6 +297,9 @@ def _rationale(
         adj = next((item for item in adjustments if item.name == name), None)
         if adj and adj.summary and len(bullets) < 6:
             bullets.append(f"{adj.summary}; etki {adj.value_c:+.1f}°C.")
+    microclimate = next((item for item in adjustments if item.name == "ltac_microclimate"), None)
+    if microclimate and microclimate.value_c != 0 and len(bullets) < 6:
+        bullets.append(f"{microclimate.summary}; etki {microclimate.value_c:+.1f}°C.")
     if taf and taf.rain_or_storm_risk and len(bullets) < 6:
         bullets.append("TAF içinde SHRA/TSRA/CB riski var; öğlen ısınma tavanı belirsiz.")
     return bullets[:6]
@@ -273,6 +315,7 @@ def _risks(
     advection = next((item for item in adjustments if item.name == "advection"), None)
     live = next((item for item in adjustments if item.name == "live_observation"), None)
     synoptic = next((item for item in adjustments if item.name == "synoptic_pressure"), None)
+    microclimate = next((item for item in adjustments if item.name == "ltac_microclimate"), None)
     upward_parts: list[str] = []
     downward_parts: list[str] = []
     critical_parts: list[str] = []
@@ -284,6 +327,8 @@ def _risks(
         upward_parts.append(f"canlı gözlem model patikasından sıcak ({live.summary})")
     if synoptic and synoptic.value_c > 0.2:
         upward_parts.append(f"yükselen basınç/sıcak üst seviye ({synoptic.summary})")
+    if microclimate and microclimate.value_c > 0.0:
+        upward_parts.append(f"LTAC istasyon değişkeni ({microclimate.summary})")
     if cloud and cloud.value_c < -0.7:
         downward_parts.append(f"radyasyon baskısı yüksek ({cloud.summary})")
     if rain and rain.value_c < -0.5:
@@ -326,3 +371,48 @@ def _display_model_name(model: str) -> str:
     if "icon" in lowered:
         return "ICON"
     return model
+
+
+def _surface_wind_direction(metar: METARNormalized | None, forecasts: list) -> float | None:
+    directions: list[float] = []
+    if metar and metar.wind_direction_deg is not None:
+        directions.append(float(metar.wind_direction_deg))
+    for forecast in forecasts:
+        for point in forecast.midday_points:
+            if point.wind_direction_10m_deg is not None:
+                directions.append(float(point.wind_direction_10m_deg))
+    return _circular_mean(directions) if directions else None
+
+
+def _midday_sunshine_pct(forecasts: list) -> float | None:
+    shortwave = []
+    opacity_values = []
+    for forecast in forecasts:
+        for point in forecast.midday_points:
+            if point.shortwave_radiation_wm2 is not None:
+                shortwave.append(float(point.shortwave_radiation_wm2))
+            layer_values = [
+                (point.cloud_cover_low_pct, 0.70),
+                (point.cloud_cover_mid_pct, 0.45),
+                (point.cloud_cover_high_pct, 0.25),
+            ]
+            layer_opacity = sum(float(value) * weight for value, weight in layer_values if value is not None)
+            if layer_opacity:
+                opacity_values.append(min(100.0, layer_opacity))
+            elif point.cloud_cover_pct is not None:
+                opacity_values.append(float(point.cloud_cover_pct) * 0.65)
+    candidates = []
+    if shortwave:
+        candidates.append(max(shortwave) / 850.0 * 100.0)
+    if opacity_values:
+        candidates.append(100.0 - mean(opacity_values))
+    if not candidates:
+        return None
+    return round(max(0.0, min(100.0, mean(candidates))), 1)
+
+
+def _circular_mean(values: list[float]) -> float:
+    sin_sum = sum(math.sin(math.radians(value)) for value in values)
+    cos_sum = sum(math.cos(math.radians(value)) for value in values)
+    angle = math.degrees(math.atan2(sin_sum, cos_sum))
+    return angle + 360 if angle < 0 else angle
