@@ -13,6 +13,7 @@ from src.data_sources.schemas import (
     ModelBundle,
     TAFNormalized,
 )
+from src.forecast.ai_effect_analysis import calculate_ai_effect_analysis
 from src.forecast.advection import calculate_advection_adjustment
 from src.forecast.bias_correction import calculate_bias_offsets
 from src.forecast.cloud_radiation import calculate_cloud_radiation_adjustment
@@ -127,6 +128,7 @@ class LTACForecastEngine:
             calculate_synoptic_pressure_adjustment(forecasts),
             calculate_cloud_radiation_adjustment(forecasts),
             calculate_rain_soil_adjustment(taf, forecasts),
+            calculate_ai_effect_analysis(metar, forecasts),
             self._ltac_microclimate_adjustment(metar, forecasts),
             ForecastAdjustment(
                 name="uncertainty",

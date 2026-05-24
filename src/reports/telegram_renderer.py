@@ -76,6 +76,9 @@ class TelegramReportRenderer:
                     recent_observations=recent_observations or [],
                 ),
                 "",
+                "AI Etki Analizi:",
+                *self._ai_effect_lines(analysis),
+                "",
                 "Neden bu tahmin?",
                 *self._rationale_lines(analysis),
                 "",
@@ -316,6 +319,13 @@ class TelegramReportRenderer:
             _bullet(f"Pist sıcaklık grafiği: {runway_series}"),
             _bullet(f"Son 6 saat trend: {trend}"),
         ]
+
+    def _ai_effect_lines(self, analysis: ForecastAnalysis) -> list[str]:
+        adjustment = next((item for item in analysis.adjustments if item.name == "ai_effect_analysis"), None)
+        bullets = adjustment.inputs.get("bullets") if adjustment else None
+        if not isinstance(bullets, list) or not bullets:
+            return [_bullet("CAPE/CIN/rüzgâr etki analizi: veri yok")]
+        return [_bullet(str(item)) for item in bullets]
 
     def _rationale_lines(self, analysis: ForecastAnalysis) -> list[str]:
         if not analysis.rationale_bullets:

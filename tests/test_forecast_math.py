@@ -16,6 +16,7 @@ from src.data_sources.schemas import (
     ModelForecast,
     ModelHourlyPoint,
 )
+from src.forecast.ai_effect_analysis import calculate_ai_effect_analysis
 from src.forecast.confidence import calculate_confidence
 from src.forecast.engine import LTACForecastEngine
 from src.forecast.engine import _fair_probabilities, _risks
@@ -172,6 +173,42 @@ def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:
     assert risks["downward"] == "Belirgin aşağı risk sinyali yok"
     assert risks["critical"] == "Belirgin kritik belirsizlik sinyali yok"
     assert "Bulut kırılması" not in risks["upward"]
+
+
+def test_ai_effect_analysis_explains_cape_cin_and_ne_wind() -> None:
+    metar = METARNormalized(
+        fetch_timestamp=datetime.now(timezone.utc),
+        observation_time=datetime.now(timezone.utc),
+        temperature_c=21,
+        dew_point_c=8,
+        wind_direction_deg=20,
+        wind_speed_kt=12,
+        raw_text="METAR LTAC 02012KT",
+    )
+    forecast = ModelForecast(
+        model="gfs_seamless",
+        available=True,
+        target_date=date(2026, 5, 24),
+        hourly=[
+            ModelHourlyPoint(
+                time=datetime(2026, 5, 24, 15, tzinfo=timezone.utc),
+                cape_jkg=850,
+                convective_inhibition_jkg=125,
+                wind_direction_10m_deg=20,
+                wind_speed_10m_kt=12,
+            )
+        ],
+        tmax_c=22,
+    )
+
+    adjustment = calculate_ai_effect_analysis(metar, [forecast])
+
+    assert adjustment.value_c == 0.0
+    assert adjustment.inputs["bullets"] == [
+        "CAPE: 850 J/kg → Öğleden sonra lokal konveksiyon riski var. Ani bulutlanma sıcaklığı baskılayabilir.",
+        "CIN: Güçlü → Atmosfer şu an patlamayı baskılıyor. Fırtına oluşumu zor.",
+        "Rüzgâr: 020° / 12 KT → Kuzeydoğulu akış hafif serinletici etki yaratıyor.",
+    ]
 
 
 def test_risks_include_synoptic_pressure_signal() -> None:
