@@ -24,11 +24,11 @@ def test_renderer_marks_missing_market_without_fake_numbers() -> None:
         verdict="Veri eksik; tahmin üretilemedi",
     )
     text = renderer.daily_report(analysis=analysis, metar=None, taf=None, model_bundle=None, market=None)
-    assert "ilgili market bulunamadı" in text
+    assert "Polymarket Canlı Fiyat: veri yok" in text
     assert "veri yok" in text
     assert "unavailable" not in text
     assert "Yatırım tavsiyesi değildir" in text
-    assert "• Polymarket link" in text
+    assert "├ Forum entegrasyonu yok; sahte kullanıcı yorumu üretilmedi." in text
     assert "* Polymarket link" not in text
 
 
@@ -74,11 +74,9 @@ def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
 
     text = renderer.daily_report(analysis=analysis, metar=None, taf=None, model_bundle=None, market=market)
 
-    assert "Sınır riski: YÜKSEK" in text
-    assert "• 20°C: 2.1¢, fair 16.1%, edge +14.0 pp" in text
-    assert "• Önerilen bracket: BET YOK" in text
-    assert "• En iyi aday (işlem yok): 20°C" in text
-    assert "• Beklenen EV: gösterilmiyor (SKIP)" in text
+    assert "⚠️ Risk 🟠 YÜKSEK" in text
+    assert "Piyasa sinyali: 20°C için fair 16.1%, fiyat 2.1¢, edge +14.0 pp." in text
+    assert "Net karar: 20°C adayı BET YOK / izle" in text
     assert "• Beklenen EV: $" not in text
 
 
@@ -111,8 +109,7 @@ def test_renderer_uses_report_labels_and_hides_placeholder_adjustments() -> None
         market=None,
         report_label="12:00",
     )
-    assert text.startswith("ANKARA ESENBOĞA ÖĞLE GÜNCELLEMESİ")
-    assert "Canlı sapma: METAR hedef gün değil" in text
+    assert text.startswith("☁️⛅️🌤️🌩️🌥️🌨️🌧️🌦️ Ankara Esenboğa Günün Tahmini")
     assert "Basınç/üst seviye: 06-09→12-15 basınç trendi -2.0 hPa" in text
     assert "mikroklima" not in text.lower()
     assert "placeholder" not in text
