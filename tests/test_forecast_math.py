@@ -5,10 +5,19 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.data_sources.schemas import EnsembleForecast, ForecastAdjustment, METARNormalized, MarketOutcome, MarketSnapshot, ModelForecast
+from src.data_sources.schemas import (
+    EnsembleForecast,
+    ForecastAdjustment,
+    METARNormalized,
+    MarketOutcome,
+    MarketSnapshot,
+    ModelForecast,
+    ModelHourlyPoint,
+)
 from src.forecast.confidence import calculate_confidence
 from src.forecast.engine import _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
+from src.forecast.synoptic_pressure import calculate_synoptic_pressure_adjustment
 
 
 def test_metar_rejects_dewpoint_above_temperature() -> None:
@@ -117,6 +126,33 @@ def test_market_fair_probabilities_use_integer_brackets() -> None:
     assert probabilities["23°C or higher"] < 0.01
 
 
+def test_synoptic_pressure_adjustment_uses_pressure_trend_and_upper_air() -> None:
+    forecast = ModelForecast(
+        model="ecmwf_ifs025",
+        available=True,
+        target_date=date(2026, 5, 24),
+        tmax_c=24.0,
+        hourly=[
+            ModelHourlyPoint(time=datetime(2026, 5, 24, 7, tzinfo=timezone.utc), pressure_msl_hpa=1012.0),
+            ModelHourlyPoint(
+                time=datetime(2026, 5, 24, 13, tzinfo=timezone.utc),
+                pressure_msl_hpa=1008.0,
+                temperature_850hpa_c=8.5,
+                geopotential_height_500hpa_m=5685.0,
+                cape_jkg=850.0,
+            ),
+        ],
+    )
+
+    adjustment = calculate_synoptic_pressure_adjustment([forecast])
+
+    assert adjustment.name == "synoptic_pressure"
+    assert adjustment.value_c == pytest.approx(-0.8)
+    assert adjustment.inputs["pressure_trend_hpa"] == pytest.approx(-4.0)
+    assert "basınç trendi -4.0 hPa" in adjustment.summary
+    assert "500 hPa 5685 m" in adjustment.summary
+
+
 def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:
     risks = _risks(
         [
@@ -133,3 +169,21 @@ def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:
     assert risks["downward"] == "Belirgin aşağı risk sinyali yok"
     assert risks["critical"] == "Belirgin kritik belirsizlik sinyali yok"
     assert "Bulut kırılması" not in risks["upward"]
+
+
+def test_risks_include_synoptic_pressure_signal() -> None:
+    risks = _risks(
+        [
+            ForecastAdjustment(
+                name="synoptic_pressure",
+                value_c=-0.8,
+                summary="06-09→12-15 basınç trendi -4.0 hPa, 850 hPa 8.5°C, 500 hPa 5685 m, CAPE 850 J/kg",
+                inputs={"pressure_trend_hpa": -4.0, "midday_cape_max_jkg": 850.0},
+            ),
+        ],
+        spread=0.7,
+        taf=None,
+    )
+
+    assert "düşen basınç/serin üst seviye" in risks["downward"]
+    assert "düşen basınç + CAPE konveksiyon riski" in risks["critical"]

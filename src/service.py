@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 from src.config import Settings
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.herbie_optional import unavailable_health as herbie_unavailable_health
 from src.data_sources.iem_asos import IEMASOSAdapter
+from src.data_sources.mgm_optional import unavailable_health as mgm_unavailable_health
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.schemas import (
@@ -178,9 +180,10 @@ class ForecastService:
             self.iem.health(),
             self.wunderground.health(),
         )
-        for item in health:
+        optional_health = [mgm_unavailable_health(), herbie_unavailable_health()]
+        for item in [*health, *optional_health]:
             self.repository.save_source_health(item)
-        return list(health)
+        return [*health, *optional_health]
 
     async def _safe_metar(self) -> METARNormalized | None:
         try:

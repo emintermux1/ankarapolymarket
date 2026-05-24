@@ -211,6 +211,7 @@ class TelegramReportRenderer:
         return [
             _bullet(f"Canlı sapma: {_adj(lookup.get('live_observation'))}"),
             _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
+            _bullet(f"Basınç/üst seviye: {_adj(lookup.get('synoptic_pressure'))}"),
             _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
             _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
         ]
