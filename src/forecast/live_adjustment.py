@@ -14,7 +14,7 @@ def calculate_live_observation_adjustment(
     report_timezone: str,
 ) -> ForecastAdjustment:
     if metar is None:
-        return ForecastAdjustment(name="live_observation", value_c=0.0, summary="METAR unavailable", inputs={})
+        return ForecastAdjustment(name="live_observation", value_c=0.0, summary="METAR verisi yok", inputs={})
     local_observation_date = metar.observation_time.astimezone(ZoneInfo(report_timezone)).date()
     if local_observation_date != target_date:
         return ForecastAdjustment(
@@ -32,7 +32,7 @@ def calculate_live_observation_adjustment(
         return ForecastAdjustment(
             name="live_observation",
             value_c=0.0,
-            summary="09:00 model path unavailable",
+            summary="09:00 model patikası verisi yok",
             inputs={"metar_temp_c": metar.temperature_c},
         )
     expected = float(mean(expected_values))
@@ -41,7 +41,7 @@ def calculate_live_observation_adjustment(
         return ForecastAdjustment(
             name="live_observation",
             value_c=0.0,
-            summary=f"METAR stale ({metar.age_minutes:.0f} dk); live adjustment disabled",
+            summary=f"METAR eski ({metar.age_minutes:.0f} dk); canlı düzeltme kapalı",
             inputs={"metar_temp_c": metar.temperature_c, "model_expected_c": expected, "delta_c": delta},
         )
     adjustment = max(-1.5, min(1.5, delta * 0.35))

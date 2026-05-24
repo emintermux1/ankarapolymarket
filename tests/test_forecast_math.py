@@ -5,9 +5,9 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.data_sources.schemas import EnsembleForecast, METARNormalized, MarketOutcome, MarketSnapshot, ModelForecast
+from src.data_sources.schemas import EnsembleForecast, ForecastAdjustment, METARNormalized, MarketOutcome, MarketSnapshot, ModelForecast
 from src.forecast.confidence import calculate_confidence
-from src.forecast.engine import _fair_probabilities
+from src.forecast.engine import _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
 
 
@@ -115,3 +115,21 @@ def test_market_fair_probabilities_use_integer_brackets() -> None:
     probabilities = _fair_probabilities(18.2, 0.8, market)
     assert probabilities["18°C"] > probabilities["19°C"]
     assert probabilities["23°C or higher"] < 0.01
+
+
+def test_risks_do_not_invent_generic_weather_when_signals_are_neutral() -> None:
+    risks = _risks(
+        [
+            ForecastAdjustment(name="live_observation", value_c=0.0, summary="METAR hedef gün değil", inputs={}),
+            ForecastAdjustment(name="advection", value_c=0.0, summary="ortalama akış 120°", inputs={}),
+            ForecastAdjustment(name="cloud_radiation", value_c=0.0, summary="bulut/radyasyon verisi yok", inputs={}),
+            ForecastAdjustment(name="rain_soil", value_c=0.0, summary="yağış verisi yok veya düşük", inputs={}),
+        ],
+        spread=0.7,
+        taf=None,
+    )
+
+    assert risks["upward"] == "Belirgin yukarı risk sinyali yok"
+    assert risks["downward"] == "Belirgin aşağı risk sinyali yok"
+    assert risks["critical"] == "Belirgin kritik belirsizlik sinyali yok"
+    assert "Bulut kırılması" not in risks["upward"]

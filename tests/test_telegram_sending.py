@@ -7,6 +7,13 @@ import pytest
 
 from src.bot.commands import _reply_long
 from src.bot.scheduler import _send_long
+from src.bot.telegram_format import format_telegram_text
+
+
+def test_telegram_text_uses_real_bullets() -> None:
+    text = format_telegram_text("* Polymarket link: https://polymarket.com/event/test\nPlain line")
+
+    assert text == "• Polymarket link: https://polymarket.com/event/test\nPlain line"
 
 
 @pytest.mark.asyncio
@@ -30,4 +37,5 @@ async def test_scheduled_channel_posts_disable_link_previews() -> None:
 
     kwargs = bot.send_message.call_args.kwargs
     assert kwargs["chat_id"] == "@ankarapm"
+    assert kwargs["text"] == "Market: https://polymarket.com/event/test"
     assert kwargs["link_preview_options"].to_dict() == {"is_disabled": True}

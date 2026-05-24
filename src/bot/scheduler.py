@@ -5,14 +5,13 @@ from datetime import date
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from telegram import LinkPreviewOptions
 from telegram.ext import Application
 
+from src.bot.telegram_format import DISABLE_LINK_PREVIEWS, format_telegram_text
 from src.config import Settings
 from src.service import ForecastService
 
 logger = logging.getLogger(__name__)
-_DISABLE_LINK_PREVIEWS = LinkPreviewOptions(is_disabled=True)
 
 
 def build_scheduler(application: Application, service: ForecastService, settings: Settings) -> AsyncIOScheduler:
@@ -70,7 +69,7 @@ async def _send_long(application: Application, chat_id: str, text: str) -> None:
                 chunk = chunk[:split_at]
         await application.bot.send_message(
             chat_id=chat_id,
-            text=chunk,
-            link_preview_options=_DISABLE_LINK_PREVIEWS,
+            text=format_telegram_text(chunk),
+            link_preview_options=DISABLE_LINK_PREVIEWS,
         )
         text = text[len(chunk):].lstrip()

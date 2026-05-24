@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -14,9 +15,19 @@ T = TypeVar("T")
 
 class SourceError(RuntimeError):
     def __init__(self, source: str, message: str) -> None:
+        message = redact_sensitive_url_values(message)
         super().__init__(f"{source}: {message}")
         self.source = source
         self.message = message
+
+
+def redact_sensitive_url_values(message: str) -> str:
+    return re.sub(
+        r"([?&](?:apikey|apiKey|key|token|api_key|access_token)=)[^&\s'\"]+",
+        r"\1<redacted>",
+        str(message),
+        flags=re.IGNORECASE,
+    )
 
 
 class HttpSource:
@@ -63,4 +74,3 @@ class HttpSource:
                     break
                 await asyncio.sleep(0.3 * (attempt + 1))
         raise SourceError(self.source_name, str(last_error))
-

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
-from telegram import LinkPreviewOptions, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.bot.telegram_format import DISABLE_LINK_PREVIEWS, format_telegram_text
 from src.service import ForecastService
-
-_DISABLE_LINK_PREVIEWS = LinkPreviewOptions(is_disabled=True)
 
 
 def service_from_context(context: ContextTypes.DEFAULT_TYPE) -> ForecastService:
@@ -14,6 +13,9 @@ def service_from_context(context: ContextTypes.DEFAULT_TYPE) -> ForecastService:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     await _reply(
         update,
         "LTAC Ankara Esenboğa bot aktif. Komutlar: "
@@ -23,12 +25,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     target = _parse_date_arg(context.args) if context.args else None
     await _reply_long(update, await service.render_daily_report(target_date=target, report_label="command"))
 
 
 async def now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     await _reply_long(update, await service.render_now())
 
 
@@ -38,39 +44,53 @@ async def metar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def taf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     await _reply_long(update, await service.render_taf())
 
 
 async def models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     target = _parse_date_arg(context.args) if context.args else None
     await _reply_long(update, await service.render_models(target_date=target))
 
 
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     target = _parse_date_arg(context.args) if context.args else None
     await _reply_long(update, await service.render_market(target_date=target))
 
 
 async def edge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     target = _parse_date_arg(context.args) if context.args else None
     await _reply_long(update, await service.render_edge(target_date=target))
 
 
 async def backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     await _reply_long(update, service.render_backtest())
 
 
 async def sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     await _reply_long(update, await service.render_sources())
 
 
 async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     target = _parse_date_arg(context.args) if context.args else None
     path, caption = await service.model_chart(target_date=target)
     if update.effective_chat:
@@ -80,6 +100,8 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
     if context.args and _is_admin(update, service):
         try:
             tmax = float(context.args[0].replace(",", "."))
@@ -94,8 +116,15 @@ async def result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = context.application.bot_data.get("service")
+    if isinstance(update, Update) and isinstance(service, ForecastService) and not _is_allowed_chat(update, service):
+        return
     if isinstance(update, Update) and update.effective_chat:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Hata: {context.error}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"Hata: {context.error}",
+            link_preview_options=DISABLE_LINK_PREVIEWS,
+        )
 
 
 def _parse_date_arg(args: list[str]) -> date:
@@ -109,9 +138,31 @@ def _is_admin(update: Update, service: ForecastService) -> bool:
     return bool(user and user.id in service.settings.telegram_admin_ids)
 
 
+def _is_allowed_chat(update: Update, service: ForecastService) -> bool:
+    settings = service.settings
+    if not settings.telegram_restrict_commands:
+        return True
+    allowed = settings.telegram_allowed_chat_keys
+    if not allowed:
+        return True
+    candidates: set[str] = set()
+    if update.effective_chat:
+        candidates.add(str(update.effective_chat.id).lower())
+        username = update.effective_chat.username
+        if username:
+            candidates.add(username.lower())
+            candidates.add(f"@{username}".lower())
+    if update.effective_user:
+        candidates.add(str(update.effective_user.id).lower())
+    return bool(candidates & allowed)
+
+
 async def _reply(update: Update, text: str) -> None:
     if update.effective_message:
-        await update.effective_message.reply_text(text, link_preview_options=_DISABLE_LINK_PREVIEWS)
+        await update.effective_message.reply_text(
+            format_telegram_text(text),
+            link_preview_options=DISABLE_LINK_PREVIEWS,
+        )
 
 
 async def _reply_long(update: Update, text: str) -> None:
@@ -119,9 +170,9 @@ async def _reply_long(update: Update, text: str) -> None:
         return
     for chunk in _chunks(text, 3900):
         await update.effective_message.reply_text(
-            chunk,
+            format_telegram_text(chunk),
             parse_mode=None,
-            link_preview_options=_DISABLE_LINK_PREVIEWS,
+            link_preview_options=DISABLE_LINK_PREVIEWS,
         )
 
 
