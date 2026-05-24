@@ -9,8 +9,8 @@ Ankara Esenboğa (LTAC) günlük maksimum sıcaklık tahmini, model karşılaşt
 - IEM ASOS LTAC geçmiş arşivi adapteri
 - Polymarket Gamma/CLOB/Data read-only reader
 - SQLAlchemy database modeli: observations, tafs, model_snapshots, forecast_runs, market_snapshots, daily_predictions, actual_results, source_status, backtest_scores, model_weights, analog_days
-- Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, üst seviye/profil, cloud/radiation, rain/soil, confidence
-- Telegram komutları: `/today`, `/now`, `/metar`, `/taf`, `/models`, `/signals`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
+- Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, basınç/üst seviye, üst seviye/profil, cloud/radiation, rain/soil, confidence
+- Telegram komutları: `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/taf`, `/models`, `/signals`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
 - APScheduler: 09:00 tam rapor, 12:00 update, 15:00 risk update, 21:00 sonuç
 - Wunderground final result: API key yoksa scraper + admin manual fallback
 
@@ -23,6 +23,7 @@ source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest
 python -m src.main report --date 2026-05-24
+python -m src.main aviation --date 2026-05-24
 python -m src.main bot
 ```
 
@@ -72,6 +73,8 @@ V1 için şart değil; kalite/fallback için sonradan eklenebilir.
 ## Market çözüm notu
 
 Polymarket Ankara marketi Wunderground Esenboğa Intl Airport Station günlük en yüksek sıcaklığına göre, tam °C hassasiyetle resolve ediyor. Bot bu yüzden tahmini `final_tmax` olarak üretir ama bracket olasılıklarını integer-rounding sınırlarıyla hesaplar. Wunderground statik HTML final değeri göstermediğinde `/result <tmax> <YYYY-MM-DD>` admin komutu ile manuel final kayıt yapılır.
+
+`/aviation` raporu LTAC METAR/TAF sinyallerini, Wunderground History URL'sini, canlı IEM ASOS/METAR maksimum proxy'sini, 13:30-15:30 lokal pik sıcaklık penceresini ve CB/bulut/radyasyon risklerini tek ekranda toplar. Bu rapor MGM'nin küsuratlı istasyon değerini değil, Wunderground'un METAR kaynaklı tam °C settlement mantığını esas alır.
 
 ## Güven skoru
 

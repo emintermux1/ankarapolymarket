@@ -13,7 +13,7 @@ from src.service import ForecastService
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LTAC Ankara temperature intelligence bot")
-    parser.add_argument("command", nargs="?", default="bot", choices=["bot", "report", "signals", "sources", "result"])
+    parser.add_argument("command", nargs="?", default="bot", choices=["bot", "report", "signals", "aviation", "sources", "result"])
     parser.add_argument("--date", dest="target_date", help="Target date as YYYY-MM-DD")
     args = parser.parse_args()
 
@@ -28,6 +28,9 @@ def main() -> None:
         return
     if args.command == "signals":
         print(asyncio.run(service.render_advanced_signals(target_date=target)))
+        return
+    if args.command == "aviation":
+        print(asyncio.run(service.render_aviation(target_date=target)))
         return
     if args.command == "sources":
         print(asyncio.run(service.render_sources()))

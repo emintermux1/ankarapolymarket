@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from datetime import date, datetime, time, timezone
 from io import StringIO
 from typing import Any
@@ -50,31 +51,18 @@ class IEMASOSAdapter(HttpSource):
         start_at = datetime.combine(target_date, time.min, tzinfo=tz)
         end_at = datetime.combine(target_date, time.max.replace(hour=23, minute=59), tzinfo=tz)
         rows = await self.fetch_history(start_at, end_at)
-        values = []
-        for row in rows:
-            raw_value = row.get("tmpc")
-            if raw_value in (None, "", "M"):
-                continue
-            try:
-                values.append(float(raw_value))
-            except ValueError:
-                continue
-        if not values:
-            return ActualResult(
-                target_date=target_date,
-                source=self.source_name,
-                fetched_at=datetime.now(timezone.utc),
-                unavailable_reason="IEM ASOS returned no LTAC temperature observations",
-            )
-        tmax = max(values)
-        return ActualResult(
-            target_date=target_date,
-            source=self.source_name,
-            fetched_at=datetime.now(timezone.utc),
-            tmax_c=tmax,
-            rounded_tmax_c=round(tmax),
-            raw_payload={"rows": rows, "observation_count": len(values)},
-        )
+        return _actual_result_from_rows(target_date, rows, self.source_name)
+
+    async def get_intraday_high(self, target_date: date, as_of: datetime | None = None) -> ActualResult:
+        tz = ZoneInfo(self.settings.report_timezone)
+        now_local = (as_of or datetime.now(timezone.utc)).astimezone(tz)
+        start_at = datetime.combine(target_date, time.min, tzinfo=tz)
+        if target_date == now_local.date():
+            end_at = now_local
+        else:
+            end_at = datetime.combine(target_date, time.max.replace(hour=23, minute=59), tzinfo=tz)
+        rows = await self.fetch_history(start_at, end_at)
+        return _actual_result_from_rows(target_date, rows, f"{self.source_name}_intraday")
 
     async def health(self) -> SourceHealth:
         started = datetime.now(timezone.utc)
@@ -86,3 +74,39 @@ class IEMASOSAdapter(HttpSource):
         except Exception as exc:
             return SourceHealth(source=self.source_name, state=SourceState.DOWN, message=str(exc))
 
+
+def _actual_result_from_rows(target_date: date, rows: list[dict[str, Any]], source: str) -> ActualResult:
+    values = []
+    for row in rows:
+        raw_value = row.get("tmpc")
+        if raw_value in (None, "", "M"):
+            continue
+        try:
+            values.append((float(raw_value), row))
+        except ValueError:
+            continue
+    if not values:
+        return ActualResult(
+            target_date=target_date,
+            source=source,
+            fetched_at=datetime.now(timezone.utc),
+            unavailable_reason="IEM ASOS returned no LTAC temperature observations",
+        )
+    tmax, max_row = max(values, key=lambda item: item[0])
+    return ActualResult(
+        target_date=target_date,
+        source=source,
+        fetched_at=datetime.now(timezone.utc),
+        tmax_c=tmax,
+        rounded_tmax_c=_reported_integer_temperature(tmax),
+        raw_payload={
+            "rows": rows,
+            "observation_count": len(values),
+            "max_observation_time": max_row.get("valid"),
+            "max_metar": max_row.get("metar"),
+        },
+    )
+
+
+def _reported_integer_temperature(value: float) -> int:
+    return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)

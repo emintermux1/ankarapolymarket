@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
 from src.config import Settings
 from src.data_sources.base import SourceError
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
@@ -117,3 +118,26 @@ async def test_tomorrow_forecast_maps_cloud_ceiling_and_radiation(monkeypatch) -
     assert forecast.hourly[0].cloud_base_m == 1200
     assert forecast.hourly[0].cloud_ceiling_m == 2400
     assert forecast.hourly[0].shortwave_radiation_wm2 == 520
+
+
+@pytest.mark.asyncio
+async def test_iem_intraday_high_tracks_reported_metar_integer_peak(monkeypatch) -> None:
+    adapter = IEMASOSAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+    as_of = datetime(2026, 5, 24, 12, 45, tzinfo=timezone.utc)
+
+    async def fake_fetch_history(start_at, end_at):
+        assert start_at.date() == date(2026, 5, 24)
+        assert end_at.astimezone(timezone.utc) == as_of
+        return [
+            {"valid": "2026-05-24 10:20", "tmpc": "20.0", "metar": "LTAC 241020Z 20/08"},
+            {"valid": "2026-05-24 11:20", "tmpc": "21.0", "metar": "LTAC 241120Z 21/08"},
+        ]
+
+    monkeypatch.setattr(adapter, "fetch_history", fake_fetch_history)
+
+    result = await adapter.get_intraday_high(date(2026, 5, 24), as_of=as_of)
+
+    assert result.source == "IEM_ASOS_intraday"
+    assert result.tmax_c == 21.0
+    assert result.rounded_tmax_c == 21
+    assert result.raw_payload["max_metar"] == "LTAC 241120Z 21/08"

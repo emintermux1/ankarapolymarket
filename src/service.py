@@ -39,6 +39,8 @@ class ForecastContext:
     taf: TAFNormalized | None
     model_bundle: ModelBundle | None
     market: MarketSnapshot | None
+    previous_analysis: ForecastAnalysis | None = None
+    previous_model_tmax_c: dict[str, float | None] | None = None
 
 
 class ForecastService:
@@ -68,6 +70,7 @@ class ForecastService:
             self._safe_models(target),
             self._safe_market(target),
         )
+        previous_model_tmax_c = self.repository.latest_model_tmax_by_target(target)
         if metar:
             self.repository.save_observation(metar)
         if taf:
@@ -84,8 +87,18 @@ class ForecastService:
             market=market,
             historical_weights=historical_weights,
         )
+        previous_prediction = self.repository.latest_prediction(target)
+        previous_analysis = ForecastAnalysis.model_validate(previous_prediction) if previous_prediction else None
         self.repository.save_forecast_analysis(analysis, report_label=report_label)
-        return ForecastContext(analysis=analysis, metar=metar, taf=taf, model_bundle=bundle, market=market)
+        return ForecastContext(
+            analysis=analysis,
+            metar=metar,
+            taf=taf,
+            model_bundle=bundle,
+            market=market,
+            previous_analysis=previous_analysis,
+            previous_model_tmax_c=previous_model_tmax_c,
+        )
 
     async def render_daily_report(self, target_date: date | None = None, report_label: str = "09:00") -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
@@ -96,6 +109,8 @@ class ForecastService:
             model_bundle=ctx.model_bundle,
             market=ctx.market,
             report_label=report_label,
+            previous_analysis=ctx.previous_analysis,
+            previous_model_tmax_c=ctx.previous_model_tmax_c,
         )
         return report
 
@@ -113,10 +128,11 @@ class ForecastService:
 
     async def render_models(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
+        previous_model_tmax_c = self.repository.latest_model_tmax_by_target(target)
         bundle = await self._safe_models(target)
         if bundle:
             self.repository.save_model_bundle(bundle)
-        return self.renderer.models_report(bundle)
+        return self.renderer.models_report(bundle, previous_model_tmax_c)
 
     async def render_advanced_signals(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
@@ -136,6 +152,25 @@ class ForecastService:
     async def render_edge(self, target_date: date | None = None) -> str:
         ctx = await self.build_forecast_context(target_date=target_date, report_label="edge")
         return self.renderer.market_report(ctx.analysis, ctx.market)
+
+    async def render_aviation(self, target_date: date | None = None) -> str:
+        target = target_date or self.default_target_date()
+        ctx = await self.build_forecast_context(target_date=target, report_label="aviation")
+        today = self.default_target_date()
+        wunderground_result, intraday_result = await asyncio.gather(
+            self._safe_wunderground_result(target) if target < today else _none(),
+            self._safe_iem_intraday_high(target) if target <= today else _none(),
+        )
+        return self.renderer.aviation_report(
+            analysis=ctx.analysis,
+            metar=ctx.metar,
+            taf=ctx.taf,
+            model_bundle=ctx.model_bundle,
+            market=ctx.market,
+            wunderground_result=wunderground_result,
+            intraday_result=intraday_result,
+            wunderground_url=self.wunderground.daily_url(target),
+        )
 
     def render_backtest(self) -> str:
         return self.renderer.backtest_report(self.repository.latest_backtest_summary())
@@ -250,3 +285,19 @@ class ForecastService:
             return await self.polymarket.get_market(target_date)
         except Exception:
             return None
+
+    async def _safe_wunderground_result(self, target_date: date) -> ActualResult | None:
+        try:
+            return await self.wunderground.get_daily_result(target_date)
+        except Exception:
+            return None
+
+    async def _safe_iem_intraday_high(self, target_date: date) -> ActualResult | None:
+        try:
+            return await self.iem.get_intraday_high(target_date)
+        except Exception:
+            return None
+
+
+async def _none() -> None:
+    return None

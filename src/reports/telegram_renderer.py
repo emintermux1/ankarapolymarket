@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
+import math
+from collections.abc import Mapping
+from datetime import date, datetime, time, timedelta, timezone
 from statistics import mean
 from zoneinfo import ZoneInfo
 
@@ -31,6 +33,8 @@ class TelegramReportRenderer:
         model_bundle: ModelBundle | None,
         market: MarketSnapshot | None,
         report_label: str | None = None,
+        previous_analysis: ForecastAnalysis | None = None,
+        previous_model_tmax_c: Mapping[str, float | None] | None = None,
     ) -> str:
         report_time = analysis.generated_at.astimezone(self.tz)
         return "\n".join(
@@ -42,7 +46,9 @@ class TelegramReportRenderer:
                 "Lokasyon: Ankara Esenboğa / LTAC",
                 "",
                 "Özet:",
-                _bullet(f"Beklenen maksimum: {_fmt_c(analysis.final_tmax_c)}"),
+                _bullet(
+                    f"Beklenen maksimum: {_fmt_c_with_trend(analysis.final_tmax_c, previous_analysis.final_tmax_c if previous_analysis else None)}"
+                ),
                 _bullet(f"Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}"),
                 _bullet(f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})"),
                 _bullet(f"Sınır riski: {_boundary_risk(analysis)}"),
@@ -55,7 +61,7 @@ class TelegramReportRenderer:
                 *self._metar_lines(metar, include_raw=False),
                 "",
                 "Model tahminleri:",
-                *self._model_lines(model_bundle, analysis),
+                *self._model_lines(model_bundle, analysis, previous_model_tmax_c),
                 "",
                 "Hava dinamiği:",
                 *self._dynamic_lines(analysis),
@@ -73,6 +79,49 @@ class TelegramReportRenderer:
                 f"Yukarı risk: {analysis.risks.get('upward', 'veri yok')}",
                 f"Aşağı risk: {analysis.risks.get('downward', 'veri yok')}",
                 f"En kritik belirsizlik: {analysis.risks.get('critical', 'veri yok')}",
+            ]
+        )
+
+    def aviation_report(
+        self,
+        *,
+        analysis: ForecastAnalysis,
+        metar: METARNormalized | None,
+        taf: TAFNormalized | None,
+        model_bundle: ModelBundle | None,
+        market: MarketSnapshot | None,
+        wunderground_result: ActualResult | None,
+        intraday_result: ActualResult | None,
+        wunderground_url: str,
+        now: datetime | None = None,
+    ) -> str:
+        report_time = (now or datetime.now(timezone.utc)).astimezone(self.tz)
+        return "\n".join(
+            [
+                "LTAC HAVACILIK + WUNDERGROUND BRİFİNGİ",
+                "",
+                f"Tarih: {analysis.target_date.isoformat()}",
+                f"Rapor saati: {report_time:%H:%M} ({self.settings.report_timezone})",
+                "Meydan: Ankara Esenboğa / LTAC",
+                "",
+                "Wunderground settlement:",
+                *self._wunderground_settlement_lines(
+                    analysis.target_date,
+                    metar,
+                    wunderground_result,
+                    intraday_result,
+                    wunderground_url,
+                    report_time,
+                ),
+                "",
+                "Havacılık gözlem/tahmin sinyalleri:",
+                *self._aviation_watch_lines(metar, taf),
+                "",
+                "Pik sıcaklık dinamiği:",
+                *self._peak_temperature_lines(model_bundle, taf),
+                "",
+                "Polymarket karar çerçevesi:",
+                *self._settlement_market_lines(analysis, market),
             ]
         )
 
@@ -102,10 +151,10 @@ class TelegramReportRenderer:
             ]
         )
 
-    def models_report(self, bundle: ModelBundle | None) -> str:
+    def models_report(self, bundle: ModelBundle | None, previous_model_tmax_c: Mapping[str, float | None] | None = None) -> str:
         if bundle is None:
             return "Model verisi yok."
-        return "\n".join(["MODEL KARŞILAŞTIRMA", *self._model_lines(bundle)])
+        return "\n".join(["MODEL KARŞILAŞTIRMA", *self._model_lines(bundle, previous_model_tmax_c=previous_model_tmax_c)])
 
     def advanced_signals_report(self, bundle: ModelBundle | None) -> str:
         if bundle is None:
@@ -190,7 +239,12 @@ class TelegramReportRenderer:
             return [_bullet(f"Son METAR: {metar.raw_text}"), *lines]
         return lines
 
-    def _model_lines(self, bundle: ModelBundle | None, analysis: ForecastAnalysis | None = None) -> list[str]:
+    def _model_lines(
+        self,
+        bundle: ModelBundle | None,
+        analysis: ForecastAnalysis | None = None,
+        previous_model_tmax_c: Mapping[str, float | None] | None = None,
+    ) -> list[str]:
         if bundle is None:
             return [_bullet("ECMWF: veri yok"), _bullet("GFS: veri yok"), _bullet("ICON: veri yok"), _bullet("Model aralığı: veri yok")]
         lines = []
@@ -199,7 +253,8 @@ class TelegramReportRenderer:
             weight = ""
             if analysis and forecast.model in analysis.model_weights:
                 weight = f" (ağırlık %{analysis.model_weights[forecast.model] * 100:.0f})"
-            value = _fmt_c(forecast.tmax_c) if forecast.available else "veri yok"
+            previous_tmax = previous_model_tmax_c.get(forecast.model) if previous_model_tmax_c else None
+            value = _fmt_c_with_trend(forecast.tmax_c, previous_tmax) if forecast.available else "veri yok"
             reason = f" - {forecast.unavailable_reason}" if not forecast.available and forecast.unavailable_reason else ""
             lines.append(_bullet(f"{label}: {value}{weight}{reason}"))
         values = [forecast.tmax_c for forecast in bundle.available_forecasts if forecast.tmax_c is not None]
@@ -378,6 +433,177 @@ class TelegramReportRenderer:
         ]
         return lines
 
+    def _wunderground_settlement_lines(
+        self,
+        target_date: date,
+        metar: METARNormalized | None,
+        wunderground_result: ActualResult | None,
+        intraday_result: ActualResult | None,
+        wunderground_url: str,
+        report_time: datetime,
+    ) -> list[str]:
+        lines = [
+            _bullet(f"History URL: {wunderground_url}"),
+            _bullet("Kural: Wunderground LTAC History tablosundaki METAR kaynaklı tam °C değeri esas alınır; gün içinde tek 21°C raporu settlement tavanını 21°C yapar."),
+        ]
+        if wunderground_result and wunderground_result.rounded_tmax_c is not None:
+            lines.append(
+                _bullet(
+                    f"Wunderground final: {wunderground_result.rounded_tmax_c}°C "
+                    f"(ham {_fmt_c(wunderground_result.tmax_c)})"
+                )
+            )
+        elif wunderground_result and wunderground_result.manual_required:
+            lines.append(_bullet("Wunderground final: statik sayfa final Tmax vermedi; History ekranından veya /result ile manuel doğrulama gerekir."))
+        else:
+            lines.append(_bullet("Wunderground final: hedef gün için henüz okunabilir final yok."))
+
+        if intraday_result and intraday_result.rounded_tmax_c is not None:
+            observation_count = intraday_result.raw_payload.get("observation_count")
+            peak_time = intraday_result.raw_payload.get("max_observation_time")
+            suffix = []
+            if peak_time:
+                suffix.append(f"pik {peak_time}")
+            if observation_count:
+                suffix.append(f"{observation_count} METAR kaydı")
+            detail = f" ({', '.join(suffix)})" if suffix else ""
+            lines.append(
+                _bullet(
+                    f"Canlı ASOS/METAR proxy: {intraday_result.rounded_tmax_c}°C "
+                    f"(ham max {_fmt_c(intraday_result.tmax_c)}){detail}"
+                )
+            )
+        else:
+            lines.append(_bullet("Canlı ASOS/METAR proxy: veri yok"))
+
+        if metar and metar.observation_time.astimezone(self.tz).date() == target_date:
+            metar_integer = _settlement_integer_from_reported_temp(metar.temperature_c)
+            current_floor = max(
+                value
+                for value in (metar_integer, intraday_result.rounded_tmax_c if intraday_result else None)
+                if value is not None
+            )
+            lines.append(_bullet(f"Son METAR sıcaklığı: {metar_integer}°C; canlı proxy settlement tavanı en az {current_floor}°C."))
+        elif metar:
+            local_date = metar.observation_time.astimezone(self.tz).date()
+            lines.append(_bullet(f"Son METAR hedef gün değil ({local_date.isoformat()}); canlı tavan çıkarımı için kullanılmadı."))
+        else:
+            lines.append(_bullet("Son METAR sıcaklığı: veri yok"))
+
+        lines.extend(
+            [
+                _bullet(f"Kesinleşme: {_finalization_status(target_date, report_time)}"),
+                _bullet("MGM notu: MGM'nin küsuratlı/yuvarlanmış istasyon değeri Wunderground History settlement yerine geçmez."),
+            ]
+        )
+        return lines
+
+    def _aviation_watch_lines(self, metar: METARNormalized | None, taf: TAFNormalized | None) -> list[str]:
+        lines: list[str] = []
+        if metar:
+            spread = metar.temperature_c - metar.dew_point_c
+            ceiling = _lowest_cloud_base(metar.cloud_layers)
+            ceiling_text = f"{ceiling} ft" if ceiling is not None else "veri yok"
+            lines.extend(
+                [
+                    _bullet(f"METAR: {metar.raw_text}"),
+                    _bullet(
+                        f"Rüzgâr/görüş/tavan: {metar.wind_direction_deg or 'VRB'}°/{metar.wind_speed_kt:.0f} kt, "
+                        f"{metar.visibility_m if metar.visibility_m is not None else 'veri yok'} m, tavan {ceiling_text}"
+                    ),
+                    _bullet(f"Sıcaklık-işba farkı: {spread:.1f}°C; düşük fark sabah radyasyon sisi/RVR gecikmesi riskini artırır."),
+                ]
+            )
+        else:
+            lines.extend([_bullet("METAR: veri yok"), _bullet("Rüzgâr/görüş/tavan: veri yok")])
+
+        if taf:
+            changes = [period.change for period in taf.periods if period.change]
+            lines.append(_bullet(f"TAF yayın: {taf.issue_time.astimezone(self.tz):%Y-%m-%d %H:%M}; değişim kodları: {', '.join(changes[:5]) if changes else 'BASE'}"))
+            lines.append(_bullet(f"TAF konveksiyon/yağış: {_taf_hazard_summary(taf)}"))
+        else:
+            lines.extend([_bullet("TAF yayın: veri yok"), _bullet("TAF konveksiyon/yağış: veri yok")])
+        return lines
+
+    def _peak_temperature_lines(self, model_bundle: ModelBundle | None, taf: TAFNormalized | None) -> list[str]:
+        if model_bundle is None:
+            return [
+                _bullet("Pik pencere: LTAC için normal operasyonel odak 13:30-15:30 lokal; model verisi yok."),
+                _bullet("Konveksiyon/radyasyon: veri yok"),
+                _bullet("850 hPa / adveksiyon: veri yok"),
+            ]
+
+        peaks = []
+        heat_points = []
+        for forecast in model_bundle.available_forecasts:
+            temp_points = [point for point in forecast.hourly if point.temperature_2m_c is not None]
+            if temp_points:
+                peak = max(temp_points, key=lambda point: point.temperature_2m_c or -999.0)
+                peaks.append(
+                    f"{_display_model_name(forecast.model)} {_fmt_c(peak.temperature_2m_c)} @{peak.time.astimezone(self.tz):%H:%M}"
+                )
+            for point in forecast.hourly:
+                local_hour = point.time.astimezone(self.tz).hour
+                if 11 <= local_hour <= 17:
+                    heat_points.append(point)
+
+        cape_values = [point.cape_jkg for point in heat_points if point.cape_jkg is not None]
+        cloud_values = [point.cloud_cover_pct for point in heat_points if point.cloud_cover_pct is not None]
+        radiation_values = [point.shortwave_radiation_wm2 for point in heat_points if point.shortwave_radiation_wm2 is not None]
+        precip_values = [point.precipitation_mm for point in heat_points if point.precipitation_mm is not None]
+        temp_850_values = [point.temperature_850hpa_c for point in heat_points if point.temperature_850hpa_c is not None]
+
+        convection = []
+        if cape_values:
+            convection.append(f"CAPE max {_fmt_num(max(cape_values))} J/kg")
+        if taf and taf.rain_or_storm_risk:
+            convection.append("TAF CB/TS/SHRA riski var")
+        if precip_values:
+            convection.append(f"max yağış {_fmt_num(max(precip_values))} mm/saat")
+
+        radiation = []
+        if radiation_values:
+            radiation.append(f"kısa dalga max {_fmt_num(max(radiation_values))} W/m²")
+        if cloud_values:
+            radiation.append(f"ortalama bulut %{_fmt_num(mean(cloud_values))}")
+
+        lines = [
+            _bullet("Pik pencere: 13:30-15:30 lokal kritik; bu aralıkta CB/bulut patlaması tavanı 1°C aşağı çekebilir."),
+            _bullet(f"Model pikleri: {'; '.join(peaks[:5]) if peaks else 'veri yok'}"),
+            _bullet(f"Konveksiyon/radyasyon: {'; '.join(convection + radiation) if convection or radiation else 'veri yok'}"),
+        ]
+        if temp_850_values:
+            lines.append(_bullet(f"850 hPa termal seviye: ortalama {_fmt_c(mean(temp_850_values))}; yüzey tavanı/adveksiyon kontrolünde izlenir."))
+        else:
+            lines.append(_bullet("850 hPa termal seviye: veri yok"))
+        return lines
+
+    def _settlement_market_lines(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> list[str]:
+        settlement_candidate = _nearest_settlement_integer(analysis.final_tmax_c)
+        if settlement_candidate is None:
+            lines = [_bullet("Bot settlement adayı: veri yok")]
+        else:
+            lines = [
+                _bullet(
+                    f"Bot settlement adayı: {settlement_candidate}°C "
+                    f"(sürekli tahmin {_fmt_c(analysis.final_tmax_c)}, sınır riski {_boundary_risk(analysis)})"
+                )
+            ]
+        lines.append(_bullet(f"Karar: {analysis.verdict}"))
+        candidate = _best_market_candidate(analysis, market)
+        if candidate is None:
+            lines.append(_bullet("Pozitif edge: geçerli market/fair probability yok."))
+        else:
+            edge, bracket, fair, implied = candidate
+            if implied <= 0.0 or implied >= 1.0:
+                lines.append(_bullet(f"En iyi market adayı: {bracket}; piyasa fiyatı geçersiz/likidite yok."))
+            elif edge >= 0.05:
+                lines.append(_bullet(f"En iyi market adayı: {bracket}; fair {_fmt_pct(fair)}, market {_fmt_cents(implied)}, edge {_fmt_pp(edge)}"))
+            else:
+                lines.append(_bullet(f"En iyi market adayı: {bracket}; edge {_fmt_pp(edge)} eşiğin altında."))
+        lines.append(_bullet("Not: Yatırım tavsiyesi değildir; Wunderground final kesinleşmeden panik işlem yapma."))
+        return lines
+
 
 def _bullet(text: str) -> str:
     return f"• {text}"
@@ -435,6 +661,18 @@ def _fmt_range(low: float | None, high: float | None) -> str:
 
 def _fmt_c(value: float | None) -> str:
     return f"{value:.1f}°C" if value is not None else "veri yok"
+
+
+def _fmt_c_with_trend(value: float | None, previous: float | None) -> str:
+    text = _fmt_c(value)
+    if value is None or previous is None:
+        return text
+    delta = value - previous
+    if delta > 0.05:
+        return f"{text} 🔺 {delta:+.1f}°C"
+    if delta < -0.05:
+        return f"{text} 🔻 {delta:+.1f}°C"
+    return text
 
 
 def _fmt_num(value: float | int | None) -> str:
@@ -517,6 +755,53 @@ def _expected_profit_usd(stake_usd: float, fair_probability: float, yes_price: f
         return None
     shares = stake_usd / yes_price
     return fair_probability * shares - stake_usd
+
+
+def _settlement_integer_from_reported_temp(value: float) -> int:
+    return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)
+
+
+def _nearest_settlement_integer(value: float | None) -> int | None:
+    if value is None:
+        return None
+    return _settlement_integer_from_reported_temp(value)
+
+
+def _finalization_status(target_date: date, report_time: datetime) -> str:
+    next_utc_midnight = datetime.combine(target_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    if report_time.astimezone(timezone.utc) < next_utc_midnight:
+        return "final değil; Wunderground gece/UTC sonrası eksik-hatalı saatleri düzeltebilir"
+    return "UTC gün kapanmış; Wunderground History final satırı yine de manuel teyit edilmeli"
+
+
+def _lowest_cloud_base(clouds: list[dict]) -> int | None:
+    bases = []
+    for cloud in clouds:
+        cover = str(cloud.get("cover") or cloud.get("type") or "")
+        if cover in {"CLR", "SKC", "NSC", "NCD"}:
+            continue
+        base = cloud.get("base")
+        if base in (None, ""):
+            continue
+        try:
+            bases.append(int(float(base)))
+        except (TypeError, ValueError):
+            continue
+    return min(bases) if bases else None
+
+
+def _taf_hazard_summary(taf: TAFNormalized) -> str:
+    hazards = []
+    for period in taf.periods:
+        weather = period.weather or ""
+        cloud_types = [str(cloud.get("type") or cloud.get("cover") or "") for cloud in period.clouds]
+        if any(token in weather for token in ("TS", "TSRA", "SHRA", "RA")):
+            start = period.time_from.strftime("%d %H:%M")
+            hazards.append(f"{period.change or 'BASE'} {weather} @{start}")
+        if any("CB" in cloud for cloud in cloud_types):
+            start = period.time_from.strftime("%d %H:%M")
+            hazards.append(f"{period.change or 'BASE'} CB @{start}")
+    return "; ".join(hazards[:4]) if hazards else "belirgin TS/CB/SHRA sinyali yok"
 
 
 def _format_clouds(clouds: list[dict]) -> str:
