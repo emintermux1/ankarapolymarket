@@ -23,7 +23,7 @@ class SourceError(RuntimeError):
 
 def redact_sensitive_url_values(message: str) -> str:
     return re.sub(
-        r"([?&](?:apikey|apiKey|key|token|api_key|access_token)=)[^&\s'\"]+",
+        r"([?&](?:apikey|apiKey|key|token|api_key|access_token|appid)=)[^&\s'\"]+",
         r"\1<redacted>",
         str(message),
         flags=re.IGNORECASE,

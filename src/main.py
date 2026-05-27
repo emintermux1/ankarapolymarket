@@ -13,8 +13,10 @@ from src.service import ForecastService
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LTAC Ankara temperature intelligence bot")
-    parser.add_argument("command", nargs="?", default="bot", choices=["bot", "report", "aviation", "forum", "sources", "result"])
+    parser.add_argument("command", nargs="?", default="bot", choices=["bot", "web", "report", "aviation", "forum", "sources", "result"])
     parser.add_argument("--date", dest="target_date", help="Target date as YYYY-MM-DD")
+    parser.add_argument("--host", default="0.0.0.0", help="Web server host")
+    parser.add_argument("--port", type=int, default=8000, help="Web server port")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -37,6 +39,13 @@ def main() -> None:
         return
     if args.command == "result":
         print(asyncio.run(service.render_result(target_date=target)))
+        return
+    if args.command == "web":
+        import uvicorn
+
+        from src.web.app import create_app
+
+        uvicorn.run(create_app(settings, repository, service), host=args.host, port=args.port)
         return
 
     application = build_application(settings, service)

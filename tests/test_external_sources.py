@@ -9,8 +9,10 @@ from src.data_sources.base import SourceError
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
+from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
+from src.data_sources.weatherbit import WeatherbitAdapter
 
 
 @pytest.mark.asyncio
@@ -79,6 +81,70 @@ async def test_tomorrow_forecast_maps_cloud_ceiling_and_radiation(monkeypatch) -
     assert forecast.hourly[0].cloud_base_m == 1200
     assert forecast.hourly[0].cloud_ceiling_m == 2400
     assert forecast.hourly[0].shortwave_radiation_wm2 == 520
+
+
+@pytest.mark.asyncio
+async def test_openweather_forecast_adds_three_hour_fallback_model(monkeypatch) -> None:
+    adapter = OpenWeatherAdapter(Settings(OPENWEATHER_API_KEY="test-key", TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["params"]["appid"] == "test-key"
+        assert kwargs["params"]["units"] == "metric"
+        return {
+            "list": [
+                {
+                    "dt_txt": "2026-05-24 12:00:00",
+                    "main": {"temp": 22.4, "humidity": 42, "pressure": 1014},
+                    "wind": {"speed": 4.0, "deg": 280},
+                    "clouds": {"all": 30},
+                    "rain": {"3h": 0.2},
+                },
+                {
+                    "dt_txt": "2026-05-24 15:00:00",
+                    "main": {"temp": 24.1, "humidity": 38},
+                    "wind": {"speed": 5.0, "deg": 290},
+                    "clouds": {"all": 15},
+                },
+            ],
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    forecast = await adapter.get_model_forecast(date(2026, 5, 24))
+
+    assert forecast.model == "openweather"
+    assert forecast.tmax_c == 24.1
+    assert forecast.hourly[0].precipitation_mm == 0.2
+    assert round(forecast.hourly[0].wind_speed_10m_kt or 0, 1) == 7.8
+
+
+@pytest.mark.asyncio
+async def test_weatherbit_forecast_adds_daily_fallback_model(monkeypatch) -> None:
+    adapter = WeatherbitAdapter(Settings(WEATHERBIT_API_KEY="test-key", TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["params"]["key"] == "test-key"
+        return {
+            "data": [
+                {
+                    "valid_date": "2026-05-24",
+                    "max_temp": 23.7,
+                    "rh": 45,
+                    "clouds": 20,
+                    "precip": 0.0,
+                    "wind_spd": 4.5,
+                    "wind_dir": 275,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    forecast = await adapter.get_model_forecast(date(2026, 5, 24))
+
+    assert forecast.model == "weatherbit"
+    assert forecast.tmax_c == 23.7
+    assert forecast.hourly[0].cloud_cover_pct == 20
 
 
 @pytest.mark.asyncio
