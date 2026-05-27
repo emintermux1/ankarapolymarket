@@ -13,6 +13,7 @@ from src.data_sources.herbie_optional import unavailable_health as herbie_unavai
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.mgm_optional import unavailable_health as mgm_unavailable_health
 from src.data_sources.openmeteo import OpenMeteoAdapter
+from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.schemas import (
     ActualResult,
@@ -27,6 +28,7 @@ from src.data_sources.schemas import (
 )
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
+from src.data_sources.weatherbit import WeatherbitAdapter
 from src.data_sources.wunderground import WundergroundScraper
 from src.db.repository import Repository, manual_actual_result
 from src.forecast.engine import LTACForecastEngine
@@ -56,6 +58,8 @@ class ForecastService:
         self.openmeteo = OpenMeteoAdapter(settings)
         self.visualcrossing = VisualCrossingAdapter(settings)
         self.tomorrow = TomorrowIOAdapter(settings)
+        self.openweather = OpenWeatherAdapter(settings)
+        self.weatherbit = WeatherbitAdapter(settings)
         self.polymarket = PolymarketAviationReader(settings)
         self.iem = IEMASOSAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
@@ -227,6 +231,8 @@ class ForecastService:
             self.openmeteo.health(),
             self.visualcrossing.health(),
             self.tomorrow.health(),
+            self.openweather.health(),
+            self.weatherbit.health(),
             self.polymarket.health(),
             self.iem.health(),
             self.wunderground.health(),
@@ -256,12 +262,14 @@ class ForecastService:
                 return None
 
     async def _safe_models(self, target_date: date) -> ModelBundle | None:
-        bundle, visual, tomorrow = await asyncio.gather(
+        bundle, visual, tomorrow, openweather, weatherbit = await asyncio.gather(
             self._safe_openmeteo_models(target_date),
             self._safe_visualcrossing_model(target_date),
             self._safe_tomorrow_model(target_date),
+            self._safe_openweather_model(target_date),
+            self._safe_weatherbit_model(target_date),
         )
-        extras = [forecast for forecast in (visual, tomorrow) if forecast is not None]
+        extras = [forecast for forecast in (visual, tomorrow, openweather, weatherbit) if forecast is not None]
         if bundle is None and extras:
             bundle = ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target_date, source="Mixed")
         if bundle is not None:
@@ -287,6 +295,22 @@ class ForecastService:
             return None
         try:
             return await self.tomorrow.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_openweather_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.openweather_api_key:
+            return None
+        try:
+            return await self.openweather.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_weatherbit_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.weatherbit_api_key:
+            return None
+        try:
+            return await self.weatherbit.get_model_forecast(target_date)
         except Exception:
             return None
 
