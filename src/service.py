@@ -8,14 +8,17 @@ from zoneinfo import ZoneInfo
 from src.config import Settings
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.havaforum import HavaForumScraper
 from src.data_sources.herbie_optional import unavailable_health as herbie_unavailable_health
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.mgm_optional import unavailable_health as mgm_unavailable_health
 from src.data_sources.openmeteo import OpenMeteoAdapter
+from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.schemas import (
     ActualResult,
     ForecastAnalysis,
+    ForumAnalysis,
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
@@ -25,6 +28,7 @@ from src.data_sources.schemas import (
 )
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
+from src.data_sources.weatherbit import WeatherbitAdapter
 from src.data_sources.wunderground import WundergroundScraper
 from src.db.repository import Repository, manual_actual_result
 from src.forecast.engine import LTACForecastEngine
@@ -39,6 +43,7 @@ class ForecastContext:
     taf: TAFNormalized | None
     model_bundle: ModelBundle | None
     market: MarketSnapshot | None
+    forum: ForumAnalysis | None = None
     recent_observations: list[dict] | None = None
     previous_analysis: ForecastAnalysis | None = None
     previous_model_tmax_c: dict[str, float | None] | None = None
@@ -53,9 +58,12 @@ class ForecastService:
         self.openmeteo = OpenMeteoAdapter(settings)
         self.visualcrossing = VisualCrossingAdapter(settings)
         self.tomorrow = TomorrowIOAdapter(settings)
+        self.openweather = OpenWeatherAdapter(settings)
+        self.weatherbit = WeatherbitAdapter(settings)
         self.polymarket = PolymarketAviationReader(settings)
         self.iem = IEMASOSAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
+        self.havaforum = HavaForumScraper(settings)
         self.engine = LTACForecastEngine(settings)
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
@@ -65,11 +73,12 @@ class ForecastService:
 
     async def build_forecast_context(self, target_date: date | None = None, report_label: str = "manual") -> ForecastContext:
         target = target_date or self.default_target_date()
-        metar, taf, bundle, market, recent_observations = await asyncio.gather(
+        metar, taf, bundle, market, forum, recent_observations = await asyncio.gather(
             self._safe_metar(),
             self._safe_taf(),
             self._safe_models(target),
             self._safe_market(target),
+            self._safe_forum(target),
             self._safe_recent_observations(target),
         )
         previous_model_tmax_c = self.repository.latest_model_tmax_by_target(target)
@@ -98,6 +107,7 @@ class ForecastService:
             taf=taf,
             model_bundle=bundle,
             market=market,
+            forum=forum,
             recent_observations=recent_observations,
             previous_analysis=previous_analysis,
             previous_model_tmax_c=previous_model_tmax_c,
@@ -111,12 +121,18 @@ class ForecastService:
             taf=ctx.taf,
             model_bundle=ctx.model_bundle,
             market=ctx.market,
+            forum=ctx.forum,
             recent_observations=ctx.recent_observations,
             report_label=report_label,
             previous_analysis=ctx.previous_analysis,
             previous_model_tmax_c=ctx.previous_model_tmax_c,
         )
         return report
+
+    async def render_forum(self, target_date: date | None = None) -> str:
+        target = target_date or self.default_target_date()
+        forum = await self._safe_forum(target)
+        return self.renderer.forum_report(forum)
 
     async def render_now(self) -> str:
         metar = await self._safe_metar()
@@ -222,9 +238,12 @@ class ForecastService:
             self.openmeteo.health(),
             self.visualcrossing.health(),
             self.tomorrow.health(),
+            self.openweather.health(),
+            self.weatherbit.health(),
             self.polymarket.health(),
             self.iem.health(),
             self.wunderground.health(),
+            self.havaforum.health(),
         )
         optional_health = [mgm_unavailable_health(), herbie_unavailable_health()]
         for item in [*health, *optional_health]:
@@ -250,12 +269,14 @@ class ForecastService:
                 return None
 
     async def _safe_models(self, target_date: date) -> ModelBundle | None:
-        bundle, visual, tomorrow = await asyncio.gather(
+        bundle, visual, tomorrow, openweather, weatherbit = await asyncio.gather(
             self._safe_openmeteo_models(target_date),
             self._safe_visualcrossing_model(target_date),
             self._safe_tomorrow_model(target_date),
+            self._safe_openweather_model(target_date),
+            self._safe_weatherbit_model(target_date),
         )
-        extras = [forecast for forecast in (visual, tomorrow) if forecast is not None]
+        extras = [forecast for forecast in (visual, tomorrow, openweather, weatherbit) if forecast is not None]
         if bundle is None and extras:
             bundle = ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target_date, source="Mixed")
         if bundle is not None:
@@ -284,9 +305,31 @@ class ForecastService:
         except Exception:
             return None
 
+    async def _safe_openweather_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.openweather_api_key:
+            return None
+        try:
+            return await self.openweather.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_weatherbit_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.weatherbit_api_key:
+            return None
+        try:
+            return await self.weatherbit.get_model_forecast(target_date)
+        except Exception:
+            return None
+
     async def _safe_market(self, target_date: date) -> MarketSnapshot | None:
         try:
             return await self.polymarket.get_market(target_date)
+        except Exception:
+            return None
+
+    async def _safe_forum(self, target_date: date) -> ForumAnalysis | None:
+        try:
+            return await self.havaforum.get_analysis(target_date)
         except Exception:
             return None
 

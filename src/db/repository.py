@@ -16,6 +16,7 @@ from src.data_sources.schemas import (
     ModelBundle,
     SourceHealth,
     TAFNormalized,
+    round_market_temperature_c,
 )
 from src.db.models import (
     ActualResultRecord,
@@ -315,6 +316,6 @@ def manual_actual_result(target_date: date, tmax_c: float) -> ActualResult:
         source="manual_wunderground_final",
         fetched_at=datetime.now(timezone.utc),
         tmax_c=tmax_c,
-        rounded_tmax_c=round(tmax_c),
+        rounded_tmax_c=round_market_temperature_c(tmax_c),
         raw_payload={"entered_manually": True},
     )

@@ -74,6 +74,14 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply_long(update, await service.render_market(target_date=target))
 
 
+async def forum(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    target = _parse_date_arg(context.args) if context.args else None
+    await _reply_long(update, await service.render_forum(target_date=target))
+
+
 async def edge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
     if not _is_allowed_chat(update, service):

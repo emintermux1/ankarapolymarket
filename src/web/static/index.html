@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ankara LTAC Market Desk</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <nav class="topbar" aria-label="Dashboard navigation">
+          <div>
+            <p class="eyebrow">Polymarket Weather Intelligence</p>
+            <h1>Ankara LTAC Market Desk</h1>
+          </div>
+          <form id="dashboard-form" class="controls">
+            <label>
+              Hedef gün
+              <input id="target-date" name="date" type="date" />
+            </label>
+            <button type="submit">Yenile</button>
+          </form>
+        </nav>
+        <section class="hero-grid">
+          <article class="hero-card primary">
+            <span class="label">Beklenen maksimum</span>
+            <strong id="final-tmax">—</strong>
+            <span id="range" class="muted">Ana aralık yükleniyor</span>
+          </article>
+          <article class="hero-card">
+            <span class="label">Güven</span>
+            <strong id="confidence">—</strong>
+            <span id="boundary-risk" class="muted">Sınır riski —</span>
+          </article>
+          <article class="hero-card wide">
+            <span class="label">Karar / edge</span>
+            <strong id="verdict">Yükleniyor</strong>
+            <span id="edge-summary" class="muted">Market bekleniyor</span>
+          </article>
+        </section>
+      </header>
+
+      <section id="status" class="status">Dashboard verisi hazırlanıyor.</section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Model Stack</p>
+              <h2>ICON / ECMWF / GFS / keyed fallback</h2>
+            </div>
+            <span id="generated-at" class="pill">—</span>
+          </div>
+          <canvas id="model-chart" width="980" height="320" aria-label="Model sıcaklık eğrileri"></canvas>
+          <div id="model-list" class="model-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">LTAC Nowcast</p>
+              <h2>METAR / TAF / son gözlem</h2>
+            </div>
+            <span id="station-pill" class="pill">LTAC</span>
+          </div>
+          <div id="metar-card" class="stack"></div>
+          <div id="taf-card" class="stack subtle"></div>
+          <div id="observation-strip" class="spark-strip"></div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Polymarket</p>
+              <h2>Bracket edge tablosu</h2>
+            </div>
+            <a id="market-link" class="pill link-pill" target="_blank" rel="noreferrer">Market</a>
+          </div>
+          <div id="market-summary" class="market-summary"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bracket</th>
+                  <th>Market</th>
+                  <th>Fair</th>
+                  <th>Edge</th>
+                  <th>Makas</th>
+                </tr>
+              </thead>
+              <tbody id="market-table"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Risk Board</p>
+              <h2>Dinamik düzeltmeler</h2>
+            </div>
+          </div>
+          <div id="adjustments" class="adjustments"></div>
+          <div id="risks" class="risk-box"></div>
+        </article>
+      </section>
+
+      <section class="grid three">
+        <article class="panel">
+          <p class="eyebrow">Yerel sinyal</p>
+          <h2>HavaForum Ankara</h2>
+          <div id="forum" class="stack"></div>
+        </article>
+        <article class="panel">
+          <p class="eyebrow">Harita ve hareket</p>
+          <h2>Radar / uydu kısayolları</h2>
+          <div id="map-links" class="link-grid"></div>
+        </article>
+        <article class="panel">
+          <p class="eyebrow">Metod</p>
+          <h2>Kaynaklardan alınan iyi parçalar</h2>
+          <div id="method-cards" class="method-cards"></div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Kaynak durumu</p>
+            <h2>API/env aktivasyon matrisi</h2>
+          </div>
+          <button id="source-refresh" class="ghost" type="button">Kaynakları test et</button>
+        </div>
+        <div id="resources" class="resources"></div>
+      </section>
+
+      <details class="panel report-panel">
+        <summary>Telegram rapor metni</summary>
+        <pre id="report-text"></pre>
+      </details>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

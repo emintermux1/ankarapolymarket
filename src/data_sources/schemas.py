@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from enum import StrEnum
 from math import exp
 from typing import Any
@@ -162,6 +163,35 @@ class ModelBundle(BaseModel):
         return [forecast for forecast in self.forecasts if forecast.available and forecast.tmax_c is not None]
 
 
+class ForumPost(BaseModel):
+    source: str = "HavaForum"
+    post_id: str
+    url: str
+    author: str | None = None
+    published_at: datetime
+    text: str
+    matches_target_context: bool = True
+
+
+class ForumAnalysis(BaseModel):
+    source: str = "HavaForum"
+    fetch_timestamp: datetime
+    target_date: date
+    thread_url: str
+    posts: list[ForumPost] = Field(default_factory=list)
+    same_day_post_count: int = 0
+    previous_day_tomorrow_post_count: int = 0
+    latest_post_at: datetime | None = None
+    locations: list[str] = Field(default_factory=list)
+    signals: dict[str, int] = Field(default_factory=dict)
+    summary: str = "Forum verisi yok."
+    unavailable_reason: str | None = None
+
+    @property
+    def post_count(self) -> int:
+        return len(self.posts)
+
+
 class OrderBookLevel(BaseModel):
     price: float
     size: float
@@ -255,3 +285,7 @@ def relative_humidity_from_temp_dewpoint(temp_c: float, dewpoint_c: float) -> in
     numerator = exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
     denominator = exp((17.625 * temp_c) / (243.04 + temp_c))
     return int(round(max(0.0, min(100.0, 100.0 * numerator / denominator))))
+
+
+def round_market_temperature_c(value: float) -> int:
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
