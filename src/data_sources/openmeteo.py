@@ -32,11 +32,17 @@ OPENMETEO_VARIABLES = [
     "surface_pressure",
     "shortwave_radiation",
     "cape",
+    "temperature_925hPa",
+    "relative_humidity_700hPa",
     "convective_inhibition",
     "temperature_850hPa",
     "geopotential_height_500hPa",
+    "wind_speed_250hPa",
+    "wind_direction_250hPa",
     "wind_speed_850hPa",
     "wind_direction_850hPa",
+    "soil_temperature_0cm",
+    "soil_moisture_0_to_1cm",
 ]
 
 FIELD_MAP = {
@@ -54,11 +60,17 @@ FIELD_MAP = {
     "surface_pressure": "surface_pressure_hpa",
     "shortwave_radiation": "shortwave_radiation_wm2",
     "cape": "cape_jkg",
+    "temperature_925hPa": "temperature_925hpa_c",
+    "relative_humidity_700hPa": "relative_humidity_700hpa_pct",
     "convective_inhibition": "convective_inhibition_jkg",
     "temperature_850hPa": "temperature_850hpa_c",
     "geopotential_height_500hPa": "geopotential_height_500hpa_m",
+    "wind_speed_250hPa": "wind_speed_250hpa_kt",
+    "wind_direction_250hPa": "wind_direction_250hpa_deg",
     "wind_speed_850hPa": "wind_speed_850hpa_kt",
     "wind_direction_850hPa": "wind_direction_850hpa_deg",
+    "soil_temperature_0cm": "soil_temperature_0cm_c",
+    "soil_moisture_0_to_1cm": "soil_moisture_0_to_1cm_m3m3",
 }
 
 ENSEMBLE_ALIASES = {

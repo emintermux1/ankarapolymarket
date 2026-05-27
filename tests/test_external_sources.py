@@ -16,6 +16,45 @@ from src.data_sources.weatherbit import WeatherbitAdapter
 
 
 @pytest.mark.asyncio
+async def test_openmeteo_maps_professional_profile_fields(monkeypatch) -> None:
+    adapter = OpenMeteoAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        hourly = kwargs["params"]["hourly"]
+        assert "wind_speed_250hPa" in hourly
+        assert "temperature_925hPa" in hourly
+        assert "soil_moisture_0_to_1cm" in hourly
+        return {
+            "latitude": 40.125,
+            "longitude": 33.0,
+            "elevation": 948,
+            "hourly": {
+                "time": ["2026-05-24T09:00", "2026-05-24T12:00"],
+                "temperature_2m_icon_eu": [13.0, 22.0],
+                "temperature_925hPa_icon_eu": [17.0, 19.0],
+                "relative_humidity_700hPa_icon_eu": [78, 82],
+                "temperature_850hPa_icon_eu": [10.0, 12.0],
+                "geopotential_height_500hPa_icon_eu": [5710, 5720],
+                "wind_speed_250hPa_icon_eu": [72, 84],
+                "wind_direction_250hPa_icon_eu": [260, 270],
+                "soil_temperature_0cm_icon_eu": [20.0, 24.0],
+                "soil_moisture_0_to_1cm_icon_eu": [0.18, 0.16],
+            },
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    bundle = await adapter.get_forecast(date(2026, 5, 24))
+    forecast = bundle.forecasts[0]
+
+    assert forecast.available is True
+    assert forecast.tmax_c == 22.0
+    assert forecast.hourly[1].wind_speed_250hpa_kt == 84
+    assert forecast.hourly[1].relative_humidity_700hpa_pct == 82
+    assert forecast.hourly[1].soil_moisture_0_to_1cm_m3m3 == 0.16
+
+
+@pytest.mark.asyncio
 async def test_visualcrossing_forecast_uses_configured_timeline_payload(monkeypatch) -> None:
     adapter = VisualCrossingAdapter(Settings(VISUALCROSSING_API_KEY="test-key", TELEGRAM_ADMIN_IDS=""))
 

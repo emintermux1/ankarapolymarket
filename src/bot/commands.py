@@ -20,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(
         update,
         "LTAC Ankara Esenboğa bot aktif. Komutlar: "
-        "/today /aviation /ltac /now /metar /taf /models /forum /market /edge /backtest /sources /chart /result",
+        "/today /aviation /ltac /now /metar /taf /models /signals /market /edge /backtest /sources /chart /result",
     )
 
 
@@ -56,6 +56,14 @@ async def models(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     target = _parse_date_arg(context.args) if context.args else None
     await _reply_long(update, await service.render_models(target_date=target))
+
+
+async def signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    target = _parse_date_arg(context.args) if context.args else None
+    await _reply_long(update, await service.render_advanced_signals(target_date=target))
 
 
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

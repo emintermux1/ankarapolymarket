@@ -9,9 +9,9 @@ from src.config import Settings
 from src.data_sources.schemas import (
     EnsembleForecast,
     ForecastAdjustment,
-    METARNormalized,
     MarketOutcome,
     MarketSnapshot,
+    METARNormalized,
     ModelBundle,
     ModelForecast,
     ModelHourlyPoint,
@@ -23,6 +23,7 @@ from src.forecast.engine import LTACForecastEngine
 from src.forecast.engine import _fair_probabilities, _risks
 from src.forecast.ensemble import calculate_model_weights, ensemble_sigma, probability_sigma, weighted_model_tmax
 from src.forecast.synoptic_pressure import calculate_synoptic_pressure_adjustment
+from src.forecast.upper_air import calculate_upper_air_profile_adjustment
 
 
 def test_metar_rejects_dewpoint_above_temperature() -> None:
@@ -108,6 +109,41 @@ def test_confidence_penalizes_large_spread() -> None:
         market=None,
     )
     assert high > low
+
+
+def test_upper_air_profile_detects_inversion_and_jet_stream() -> None:
+    forecast = ModelForecast(
+        model="icon_eu",
+        available=True,
+        target_date=date(2026, 5, 24),
+        hourly=[
+            ModelHourlyPoint(
+                time=datetime(2026, 5, 24, 7, tzinfo=timezone.utc),
+                temperature_2m_c=10.0,
+                temperature_925hpa_c=14.5,
+                wind_speed_250hpa_kt=80,
+            ),
+            ModelHourlyPoint(
+                time=datetime(2026, 5, 24, 12, tzinfo=timezone.utc),
+                temperature_2m_c=22.0,
+                temperature_925hpa_c=18.0,
+                temperature_850hpa_c=12.0,
+                geopotential_height_500hpa_m=5720,
+                wind_speed_250hpa_kt=95,
+                relative_humidity_700hpa_pct=86,
+                cape_jkg=450,
+            ),
+        ],
+        tmax_c=22.0,
+    )
+
+    adjustment = calculate_upper_air_profile_adjustment([forecast])
+
+    assert adjustment.name == "upper_air_profile"
+    assert adjustment.value_c < 0
+    assert adjustment.inputs["morning_inversion_strength_c"] == pytest.approx(4.5)
+    assert adjustment.inputs["max_250hpa_wind_kt"] == 95
+    assert "250 hPa jet 95 kt" in adjustment.summary
 
 
 def test_market_fair_probabilities_use_integer_brackets() -> None:
