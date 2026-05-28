@@ -47,6 +47,94 @@ class Settings(BaseSettings):
             "TELEGRAM_RESTRICT_COMMANDS",
         ),
     )
+    telegram_channel_mode: str = Field(
+        default="hourly_max",
+        validation_alias=AliasChoices("ANKARA_TELEGRAM_CHANNEL_MODE", "LTAC_TELEGRAM_CHANNEL_MODE", "TELEGRAM_CHANNEL_MODE"),
+    )
+    telegram_hourly_forecast_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_ENABLED",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_ENABLED",
+            "TELEGRAM_HOURLY_FORECAST_ENABLED",
+        ),
+    )
+    telegram_hourly_forecast_channel_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_CHANNEL_ID",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_CHANNEL_ID",
+            "TELEGRAM_HOURLY_FORECAST_CHANNEL_ID",
+        ),
+    )
+    telegram_hourly_forecast_start_hour: int = Field(
+        default=8,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_START_HOUR",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_START_HOUR",
+            "TELEGRAM_HOURLY_FORECAST_START_HOUR",
+        ),
+    )
+    telegram_hourly_forecast_end_hour: int = Field(
+        default=20,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_END_HOUR",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_END_HOUR",
+            "TELEGRAM_HOURLY_FORECAST_END_HOUR",
+        ),
+    )
+    telegram_hourly_forecast_minute: int = Field(
+        default=0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_MINUTE",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_MINUTE",
+            "TELEGRAM_HOURLY_FORECAST_MINUTE",
+        ),
+    )
+    telegram_hourly_forecast_min_edge_pp: float = Field(
+        default=8.0,
+        ge=0.0,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_MIN_EDGE_PP",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_MIN_EDGE_PP",
+            "TELEGRAM_HOURLY_FORECAST_MIN_EDGE_PP",
+        ),
+    )
+    telegram_hourly_forecast_min_confidence: int = Field(
+        default=60,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_MIN_CONFIDENCE",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_MIN_CONFIDENCE",
+            "TELEGRAM_HOURLY_FORECAST_MIN_CONFIDENCE",
+        ),
+    )
+    telegram_hourly_forecast_no_bet_confidence: int = Field(
+        default=45,
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_NO_BET_CONFIDENCE",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_NO_BET_CONFIDENCE",
+            "TELEGRAM_HOURLY_FORECAST_NO_BET_CONFIDENCE",
+        ),
+    )
+    telegram_hourly_forecast_model_spread_c: float = Field(
+        default=2.0,
+        ge=0.0,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_HOURLY_FORECAST_MODEL_SPREAD_C",
+            "LTAC_TELEGRAM_HOURLY_FORECAST_MODEL_SPREAD_C",
+            "TELEGRAM_HOURLY_FORECAST_MODEL_SPREAD_C",
+        ),
+    )
 
     database_url: str = Field(default="sqlite:///./data/ltac_weather_bot.db", alias="DATABASE_URL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -165,13 +253,39 @@ class Settings(BaseSettings):
     def parse_admin_ids(cls, value: list[Any]) -> list[int]:
         return [int(item) for item in value]
 
+    @field_validator("telegram_channel_mode", mode="after")
+    @classmethod
+    def normalize_telegram_channel_mode(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "hourly": "hourly_max",
+            "hourly_max": "hourly_max",
+            "hourly_forecast": "hourly_max",
+            "legacy": "legacy_reports",
+            "legacy_reports": "legacy_reports",
+            "both": "both",
+        }
+        if normalized not in aliases:
+            raise ValueError("TELEGRAM_CHANNEL_MODE must be one of hourly_max, legacy_reports, or both")
+        return aliases[normalized]
+
     @property
     def telegram_allowed_chat_keys(self) -> set[str]:
         keys = {str(item).strip().lower() for item in self.telegram_allowed_chat_ids if str(item).strip()}
         if self.telegram_channel_id:
             keys.add(str(self.telegram_channel_id).strip().lower())
+        if self.telegram_hourly_forecast_channel_id:
+            keys.add(str(self.telegram_hourly_forecast_channel_id).strip().lower())
         keys.update(str(item) for item in self.telegram_admin_ids)
         return keys
+
+    @property
+    def telegram_hourly_forecast_target_chat_id(self) -> str | None:
+        return self.telegram_hourly_forecast_channel_id or self.telegram_channel_id
+
+    @property
+    def telegram_channel_mode_normalized(self) -> str:
+        return self.telegram_channel_mode
 
     @property
     def is_sqlite(self) -> bool:

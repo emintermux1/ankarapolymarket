@@ -46,6 +46,75 @@ def test_renderer_marks_missing_market_without_fake_numbers() -> None:
     assert "* Polymarket link" not in text
 
 
+def test_hourly_max_forecast_is_short_exact_degree_message() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 27, 10, 5, tzinfo=timezone.utc)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 27),
+        generated_at=now,
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=24.1,
+        final_tmax_c=24.3,
+        main_range_low_c=23.7,
+        main_range_high_c=24.9,
+        model_spread_c=0.8,
+        probability_sigma_c=0.7,
+        confidence_score=78,
+        confidence_factors={},
+        verdict="24.3°C merkezli kontrollü tahmin",
+        fair_probabilities={"24°C": 0.72},
+        edge_summary="En iyi edge: 24°C +11.0pp; bot fair %72.0, piyasa %61.0",
+    )
+    metar = METARNormalized(
+        fetch_timestamp=now,
+        observation_time=now,
+        temperature_c=23.0,
+        dew_point_c=11.0,
+        relative_humidity=47,
+        wind_direction_deg=210,
+        wind_speed_kt=5.0,
+        pressure_hpa=1018.0,
+        visibility_m=9999,
+        cloud_layers=[],
+        raw_text="METAR LTAC 271005Z 21005KT 9999 23/11 Q1018 NOSIG",
+    )
+    market = MarketSnapshot(
+        fetch_timestamp=now,
+        event_id="1",
+        title="Highest temperature in Ankara on May 27?",
+        slug="highest-temperature-in-ankara-on-may-27-2026",
+        target_date=date(2026, 5, 27),
+        active=True,
+        closed=False,
+        valid_for_target=True,
+        link="https://polymarket.com/event/highest-temperature-in-ankara-on-may-27-2026",
+        outcomes=[
+            MarketOutcome(
+                question="Will the highest temperature in Ankara be 24°C on May 27?",
+                bracket="24°C",
+                yes_price=0.61,
+            )
+        ],
+    )
+
+    text = renderer.hourly_max_forecast(
+        analysis=analysis,
+        metar=metar,
+        model_bundle=None,
+        market=market,
+        recent_observations=[{"tmpc": 20.0}, {"tmpc": 22.5}],
+    )
+
+    assert "SAAT BAŞI MAX TAHMİNİ" in text
+    assert "Bugünün göreceği max: 24°C" in text
+    assert "Model merkezi: 24.3°C" in text
+    assert "Canlı sıcaklık: 23.0°C" in text
+    assert "Gün içi ölçülen max: 23.0°C" in text
+    assert "Polymarket: 24°C" in text
+    assert "Yatırım tavsiyesi değildir" in text
+
+
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)

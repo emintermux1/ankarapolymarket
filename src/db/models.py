@@ -132,6 +132,20 @@ class SourceStatus(Base):
     message: Mapped[str | None] = mapped_column(Text)
 
 
+class TelegramDelivery(Base):
+    __tablename__ = "telegram_deliveries"
+    __table_args__ = (UniqueConstraint("delivery_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    delivery_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    chat_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+
 class BacktestScore(Base):
     __tablename__ = "backtest_scores"
 
@@ -172,4 +186,3 @@ class AnalogDay(Base):
     similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
     setup_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     actual_tmax_c: Mapped[float | None] = mapped_column(Float)
-
