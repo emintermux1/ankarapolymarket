@@ -132,6 +132,14 @@ class SourceStatus(Base):
     message: Mapped[str | None] = mapped_column(Text)
 
 
+class NotificationState(Base):
+    __tablename__ = "notification_state"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+
 class BacktestScore(Base):
     __tablename__ = "backtest_scores"
 
@@ -172,4 +180,3 @@ class AnalogDay(Base):
     similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
     setup_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     actual_tmax_c: Mapped[float | None] = mapped_column(Float)
-

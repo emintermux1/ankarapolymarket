@@ -12,7 +12,7 @@ Ankara Esenboğa (LTAC) günlük maksimum sıcaklık tahmini, model karşılaşt
 - SQLAlchemy database modeli: observations, tafs, model_snapshots, forecast_runs, market_snapshots, daily_predictions, actual_results, source_status, backtest_scores, model_weights, analog_days
 - Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, cloud/radiation, rain/soil, confidence
 - Telegram komutları: `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/taf`, `/models`, `/forum`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
-- APScheduler: 09:00 tam rapor, 12:00 update, 15:00 risk update, 21:00 sonuç
+- APScheduler: 09:00 kısa Telegram tahmini, tahmin anlamlı değişirse kanal uyarısı, market sonucu kesinleşince tek resolve bildirimi
 - Wunderground final result: API key yoksa scraper + admin manual fallback
 
 ## Kurulum

@@ -189,6 +189,10 @@ class ForecastService:
         return self.renderer.sources_report(health)
 
     async def render_result(self, target_date: date | None = None) -> str:
+        result = await self.get_actual_result(target_date)
+        return self.renderer.result_report(result)
+
+    async def get_actual_result(self, target_date: date | None = None) -> ActualResult:
         target = target_date or self.default_target_date()
         if self.settings.visualcrossing_api_key:
             result = await self.visualcrossing.get_daily_result(target)
@@ -197,7 +201,7 @@ class ForecastService:
         else:
             result = await self.wunderground.get_daily_result(target)
         self.repository.save_actual_result(result)
-        return self.renderer.result_report(result)
+        return result
 
     def save_manual_result(self, target_date: date, tmax_c: float) -> str:
         result = manual_actual_result(target_date, tmax_c)
