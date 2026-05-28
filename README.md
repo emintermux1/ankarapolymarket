@@ -10,9 +10,10 @@ Ankara Esenboğa (LTAC) günlük maksimum sıcaklık tahmini, model karşılaşt
 - IEM ASOS LTAC geçmiş arşivi adapteri
 - Polymarket Gamma/CLOB/Data read-only reader
 - SQLAlchemy database modeli: observations, tafs, model_snapshots, forecast_runs, market_snapshots, daily_predictions, actual_results, source_status, backtest_scores, model_weights, analog_days
-- Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, cloud/radiation, rain/soil, confidence
-- Telegram komutları: `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/taf`, `/models`, `/forum`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
-- APScheduler: 09:00 kısa Telegram tahmini, tahmin anlamlı değişirse kanal uyarısı, market sonucu kesinleşince tek resolve bildirimi
+- Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, basınç/üst seviye, üst seviye/profil, cloud/radiation, rain/soil, confidence
+- Telegram komutları: `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/taf`, `/models`, `/signals`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
+- APScheduler: 09:00 kısa Telegram tahmini, anlamlı tahmin değişirse kanal uyarısı, market sonucu kesinleşince tek resolve bildirimi
+- FastAPI dashboard: LTAC model stack, METAR/TAF, Polymarket bracket edge, risk board, kaynak/env matrisi
 - Wunderground final result: API key yoksa scraper + admin manual fallback
 
 ## Kurulum
@@ -26,6 +27,7 @@ pytest
 python -m src.main report --date 2026-05-24
 python -m src.main aviation --date 2026-05-24
 python -m src.main forum --date 2026-05-24
+python -m src.main web --host 127.0.0.1 --port 8000
 python -m src.main bot
 ```
 
@@ -65,12 +67,15 @@ V1 için şart değil; kalite/fallback için sonradan eklenebilir.
 
 - CheckWX: https://www.checkwxapi.com/
 - AVWX: https://avwx.rest/
+- OpenWeather: https://openweathermap.org/api
+- Weatherbit: https://www.weatherbit.io/api
 - Visual Crossing: https://www.visualcrossing.com/weather-api/
 - WeatherAPI: https://www.weatherapi.com/docs/
 - Tomorrow.io: https://docs.tomorrow.io/reference/weather-forecast
 - Meteoblue: https://docs.meteoblue.com/
 - Windy: https://api.windy.com/
 - Weather.com/Wunderground/TWC API: https://developer.weather.com/
+- MapTiler/Mapbox/Cesium/HERE: dashboard harita katmanları için env-ready; tokenlar server-side tutulur.
 
 ## Market çözüm notu
 

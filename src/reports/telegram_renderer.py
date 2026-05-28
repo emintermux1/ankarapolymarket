@@ -18,6 +18,7 @@ from src.data_sources.schemas import (
     SourceHealth,
     TAFNormalized,
 )
+from src.forecast.upper_air import calculate_upper_air_profile_adjustment
 
 
 class TelegramReportRenderer:
@@ -176,6 +177,11 @@ class TelegramReportRenderer:
         if bundle is None:
             return "Model verisi yok."
         return "\n".join(["MODEL KARŞILAŞTIRMA", *self._model_lines(bundle, previous_model_tmax_c=previous_model_tmax_c)])
+
+    def advanced_signals_report(self, bundle: ModelBundle | None) -> str:
+        if bundle is None:
+            return "\n".join(["İLERİ METEOROLOJİ SİNYALLERİ", _bullet("Model verisi yok")])
+        return "\n".join(["İLERİ METEOROLOJİ SİNYALLERİ", *self._advanced_signal_lines(bundle)])
 
     def market_report(self, analysis: ForecastAnalysis | None, market: MarketSnapshot | None) -> str:
         if market is None:
@@ -356,6 +362,7 @@ class TelegramReportRenderer:
             _bullet(f"Canlı sapma: {_adj(lookup.get('live_observation'))}"),
             _bullet(f"Rüzgâr/adveksiyon: {_adj(lookup.get('advection'))}"),
             _bullet(f"Basınç/üst seviye: {_adj(lookup.get('synoptic_pressure'))}"),
+            _bullet(f"Üst seviye/profil: {_adj(lookup.get('upper_air_profile'))}"),
             _bullet(f"Bulut/radyasyon: {_adj(lookup.get('cloud_radiation'))}"),
             _bullet(f"Yağış/zemin: {_adj(lookup.get('rain_soil'))}"),
         ]
@@ -612,6 +619,26 @@ class TelegramReportRenderer:
             lines.append(_bullet("Polymarket: hedef market doğrulandı"))
         return lines
 
+    def _advanced_signal_lines(self, bundle: ModelBundle) -> list[str]:
+        adjustment = calculate_upper_air_profile_adjustment(bundle.forecasts)
+        inputs = adjustment.inputs
+        soil_moisture = _mean(_bundle_values(bundle, "soil_moisture_0_to_1cm_m3m3"))
+        soil_temperature = _mean(_bundle_values(bundle, "soil_temperature_0cm_c"))
+        lines = [
+            _bullet(f"Üst seviye/profil: {adjustment.summary} (tmax etkisi {adjustment.value_c:+.1f}°C)"),
+            _bullet(f"500 hPa yükseklik: {_fmt_m(inputs.get('midday_500hpa_height_m'))}"),
+            _bullet(f"Jet akımı: {_fmt_kt(inputs.get('max_250hpa_wind_kt'))}"),
+            _bullet(f"Enversiyon: {_fmt_signed_c(inputs.get('morning_inversion_strength_c'))}"),
+            _bullet(
+                "Konveksiyon/nem: "
+                f"CAPE {_fmt_num(inputs.get('max_cape_jkg'))} J/kg, "
+                f"700 hPa nem {_fmt_pct_from_whole(inputs.get('midday_700hpa_relative_humidity_pct'))}"
+            ),
+            _bullet(f"Zemin: toprak nemi {_fmt_soil_moisture(soil_moisture)}, yüzey {_fmt_c(soil_temperature)}"),
+            _bullet("Okyanus/SST/ENSO sinyalleri Ankara günlük Tmax için doğrudan değil; mevsimsel arka plan olarak izlenmeli."),
+        ]
+        return lines
+
     def _wunderground_settlement_lines(
         self,
         target_date: date,
@@ -860,6 +887,36 @@ def _fmt_num(value: float | int | None) -> str:
     return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
+def _fmt_m(value: object | None) -> str:
+    if value is None:
+        return "veri yok"
+    return f"{float(value):,.0f} m"
+
+
+def _fmt_kt(value: object | None) -> str:
+    if value is None:
+        return "veri yok"
+    return f"{float(value):.0f} kt"
+
+
+def _fmt_signed_c(value: object | None) -> str:
+    if value is None:
+        return "veri yok"
+    return f"{float(value):+.1f}°C"
+
+
+def _fmt_pct_from_whole(value: object | None) -> str:
+    if value is None:
+        return "veri yok"
+    return f"%{float(value):.0f}"
+
+
+def _fmt_soil_moisture(value: float | None) -> str:
+    if value is None:
+        return "veri yok"
+    return f"{value:.2f} m³/m³"
+
+
 def _fmt_pct(value: float | None) -> str:
     return f"{value * 100:.1f}%" if value is not None else "veri yok"
 
@@ -1031,6 +1088,20 @@ def _format_clouds(clouds: list[dict]) -> str:
     if not clouds:
         return "veri yok"
     return ", ".join(f"{cloud.get('cover', '?')}{cloud.get('base', '')}" for cloud in clouds)
+
+
+def _bundle_values(bundle: ModelBundle, field: str) -> list[float]:
+    values = []
+    for forecast in bundle.available_forecasts:
+        for point in forecast.midday_points:
+            value = getattr(point, field)
+            if value is not None:
+                values.append(float(value))
+    return values
+
+
+def _mean(values: list[float]) -> float | None:
+    return mean(values) if values else None
 
 
 def _cloud_density_pct(

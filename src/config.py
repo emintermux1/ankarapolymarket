@@ -103,11 +103,13 @@ class Settings(BaseSettings):
     )
 
     weathercom_api_key: str | None = Field(default=None, alias="WEATHERCOM_API_KEY")
+    openweather_api_key: str | None = Field(default=None, alias="OPENWEATHER_API_KEY")
     checkwx_api_key: str | None = Field(default=None, alias="CHECKWX_API_KEY")
     avwx_api_key: str | None = Field(default=None, alias="AVWX_API_KEY")
     visualcrossing_api_key: str | None = Field(default=None, alias="VISUALCROSSING_API_KEY")
     visualcrossing_location: str = Field(default="ankara esenboğa", alias="VISUALCROSSING_LOCATION")
     weatherapi_api_key: str | None = Field(default=None, alias="WEATHERAPI_API_KEY")
+    weatherbit_api_key: str | None = Field(default=None, alias="WEATHERBIT_API_KEY")
     tomorrow_api_key: str | None = Field(default=None, alias="TOMORROW_API_KEY")
     meteoblue_api_key: str | None = Field(default=None, alias="METEOBLUE_API_KEY")
     windy_api_key: str | None = Field(default=None, alias="WINDY_API_KEY")
@@ -116,6 +118,13 @@ class Settings(BaseSettings):
     mapbox_api_key: str | None = Field(default=None, alias="MAPBOX_API_KEY")
     cesium_ion_token: str | None = Field(default=None, alias="CESIUM_ION_TOKEN")
     here_api_key: str | None = Field(default=None, alias="HERE_API_KEY")
+    rainbow_api_key: str | None = Field(default=None, alias="RAINBOW_API_KEY")
+    stormglass_api_key: str | None = Field(default=None, alias="STORMGLASS_API_KEY")
+    rapidapi_key: str | None = Field(default=None, alias="RAPIDAPI_KEY")
+    copernicus_cds_api_key: str | None = Field(default=None, alias="COPERNICUS_CDS_API_KEY")
+    xweather_client_id: str | None = Field(default=None, alias="XWEATHER_CLIENT_ID")
+    xweather_client_secret: str | None = Field(default=None, alias="XWEATHER_CLIENT_SECRET")
+    xweather_namespace: str | None = Field(default=None, alias="XWEATHER_NAMESPACE")
     havaforum_thread_url: str = Field(
         default="https://forum.havaforum.com/thread/8893-ankara-%C3%B6zel-raporlar-yorumlar/",
         alias="HAVAFORUM_THREAD_URL",
