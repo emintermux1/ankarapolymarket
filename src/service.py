@@ -129,6 +129,17 @@ class ForecastService:
         )
         return report
 
+    async def render_hourly_max_forecast(self, target_date: date | None = None, report_label: str = "hourly") -> str:
+        ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
+        return self.renderer.hourly_max_forecast(
+            analysis=ctx.analysis,
+            metar=ctx.metar,
+            model_bundle=ctx.model_bundle,
+            market=ctx.market,
+            recent_observations=ctx.recent_observations,
+            previous_analysis=ctx.previous_analysis,
+        )
+
     async def render_forum(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
         forum = await self._safe_forum(target)

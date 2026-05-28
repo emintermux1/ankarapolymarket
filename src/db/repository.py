@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import create_engine, desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -30,6 +31,7 @@ from src.db.models import (
     Observation,
     SourceStatus,
     TAF,
+    TelegramDelivery,
 )
 
 
@@ -299,6 +301,40 @@ class Repository:
                 .limit(1)
             )
         return row.payload if row else None
+
+    def telegram_delivery_exists(self, key: str) -> bool:
+        with self.session_factory() as session:
+            row = session.scalar(select(TelegramDelivery.id).where(TelegramDelivery.delivery_key == key).limit(1))
+            return row is not None
+
+    def save_telegram_delivery(
+        self,
+        *,
+        key: str,
+        chat_id: str,
+        kind: str,
+        target_date: date,
+        scheduled_for: datetime,
+        payload: dict[str, Any],
+    ) -> bool:
+        with self.session_factory() as session:
+            session.add(
+                TelegramDelivery(
+                    delivery_key=key,
+                    chat_id=chat_id,
+                    kind=kind,
+                    target_date=target_date,
+                    scheduled_for=scheduled_for,
+                    sent_at=datetime.now(timezone.utc),
+                    payload=payload,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                return False
+            return True
 
 
 def create_repository(settings: Settings) -> Repository:
