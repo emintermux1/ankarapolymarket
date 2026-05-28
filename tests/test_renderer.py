@@ -46,6 +46,77 @@ def test_renderer_marks_missing_market_without_fake_numbers() -> None:
     assert "* Polymarket link" not in text
 
 
+def test_hourly_max_forecast_is_compact_and_max_focused() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    generated_at = datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc)
+    analysis = ForecastAnalysis(
+        target_date=date(2026, 5, 24),
+        generated_at=generated_at,
+        report_timezone="Europe/Istanbul",
+        weighted_model_tmax_c=24.2,
+        final_tmax_c=24.5,
+        main_range_low_c=23.6,
+        main_range_high_c=25.4,
+        model_spread_c=1.0,
+        probability_sigma_c=0.9,
+        confidence_score=82,
+        confidence_factors={},
+        verdict="24.5°C merkezli kontrollü tahmin",
+        fair_probabilities={"25°C": 0.367},
+    )
+    metar = METARNormalized(
+        fetch_timestamp=generated_at,
+        observation_time=generated_at,
+        temperature_c=23.0,
+        dew_point_c=10.0,
+        relative_humidity=44,
+        wind_direction_deg=120,
+        wind_speed_kt=5.0,
+        pressure_hpa=1019.0,
+        visibility_m=9999,
+        raw_text="LTAC 240900Z 12005KT 9999 SCT040 23/10 Q1019",
+    )
+    bundle = ModelBundle(
+        fetch_timestamp=generated_at,
+        target_date=date(2026, 5, 24),
+        forecasts=[
+            ModelForecast(
+                model="icon_eu",
+                available=True,
+                target_date=date(2026, 5, 24),
+                tmax_c=24.7,
+                hourly=[
+                    ModelHourlyPoint(time=datetime(2026, 5, 24, 12, tzinfo=timezone.utc), temperature_2m_c=23.5),
+                    ModelHourlyPoint(time=datetime(2026, 5, 24, 13, tzinfo=timezone.utc), temperature_2m_c=24.7),
+                ],
+            ),
+            ModelForecast(model="ecmwf", available=True, target_date=date(2026, 5, 24), tmax_c=24.1),
+        ],
+    )
+    market = MarketSnapshot(
+        fetch_timestamp=generated_at,
+        event_id="1",
+        title="Highest temperature in Ankara on May 24?",
+        slug="highest-temperature-in-ankara-on-may-24-2026",
+        target_date=date(2026, 5, 24),
+        active=True,
+        closed=False,
+        valid_for_target=True,
+        link="https://polymarket.com/event/highest-temperature-in-ankara-on-may-24-2026",
+        outcomes=[MarketOutcome(question="Will Ankara be 25°C?", bracket="25°C", yes_price=0.19)],
+    )
+
+    text = renderer.hourly_max_forecast(analysis=analysis, metar=metar, taf=None, model_bundle=bundle, market=market)
+
+    assert text.startswith("ANKARA LTAC SAAT BAŞI MAKS TAHMİN")
+    assert "Bugünün beklenen en yüksek sıcaklığı: 24.5°C" in text
+    assert "Market tescil adayı: 25°C" in text
+    assert "Güven: 82/100" in text
+    assert "Market fiyatlaması" not in text
+    assert len(text.splitlines()) <= 12
+
+
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)

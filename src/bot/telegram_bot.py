@@ -20,6 +20,8 @@ def build_application(settings: Settings, service: ForecastService) -> Applicati
     )
     application.bot_data["service"] = service
     application.add_handler(CommandHandler("start", commands.start))
+    application.add_handler(CommandHandler("forecast", commands.forecast))
+    application.add_handler(CommandHandler("hourly", commands.forecast))
     application.add_handler(CommandHandler("today", commands.today))
     application.add_handler(CommandHandler("now", commands.now))
     application.add_handler(CommandHandler("metar", commands.metar))

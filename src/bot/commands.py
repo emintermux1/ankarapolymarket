@@ -20,8 +20,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(
         update,
         "LTAC Ankara Esenboğa bot aktif. Komutlar: "
-        "/today /aviation /ltac /now /metar /taf /models /signals /market /edge /backtest /sources /chart /result",
+        "/forecast /today /aviation /ltac /now /metar /taf /models /signals /market /edge /backtest /sources /chart /result",
     )
+
+
+async def forecast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    target = _parse_date_arg(context.args) if context.args else None
+    await _reply_long(update, await service.render_hourly_max_forecast(target_date=target))
 
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
