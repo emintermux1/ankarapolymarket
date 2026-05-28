@@ -104,6 +104,35 @@ class TelegramReportRenderer:
             ]
         )
 
+    def hourly_max_forecast(
+        self,
+        *,
+        analysis: ForecastAnalysis,
+        metar: METARNormalized | None,
+        taf: TAFNormalized | None,
+        model_bundle: ModelBundle | None,
+        market: MarketSnapshot | None,
+    ) -> str:
+        report_time = analysis.generated_at.astimezone(self.tz)
+        settlement = _nearest_settlement_integer(analysis.final_tmax_c)
+        settlement_text = f"{settlement}°C" if settlement is not None else "veri yok"
+        lines = [
+            "ANKARA LTAC SAAT BAŞI MAKS TAHMİN",
+            f"{report_time:%H:%M} • {analysis.target_date.isoformat()}",
+            "",
+            f"Bugünün beklenen en yüksek sıcaklığı: {_fmt_c(analysis.final_tmax_c)}",
+            f"Market tescil adayı: {settlement_text}",
+            f"Belirsizlik bandı: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}",
+            f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)}), sınır riski {_boundary_risk(analysis)}",
+            f"Canlı LTAC: {_hourly_metar_line(metar)}",
+            f"Model özeti: {_hourly_model_line(model_bundle)}",
+            f"Pik pencere: {_hourly_peak_line(model_bundle, self.tz)}",
+        ]
+        if taf and taf.rain_or_storm_risk:
+            lines.append(f"TAF uyarısı: {_taf_hazard_summary(taf)}")
+        lines.append(f"Karar: {analysis.verdict}")
+        return "\n".join(lines)
+
     def aviation_report(
         self,
         *,
@@ -746,6 +775,57 @@ class TelegramReportRenderer:
                 lines.append(_bullet(f"En iyi market adayı: {bracket}; edge {_fmt_pp(edge)} eşiğin altında."))
         lines.append(_bullet("Not: Yatırım tavsiyesi değildir; Wunderground final kesinleşmeden panik işlem yapma."))
         return lines
+
+
+def _hourly_metar_line(metar: METARNormalized | None) -> str:
+    if metar is None:
+        return "veri yok"
+    age = f"{metar.age_minutes:.0f} dk" if metar.age_minutes < 180 else f"{metar.age_minutes / 60:.1f} saat"
+    wind_direction = metar.wind_direction_deg if metar.wind_direction_deg is not None else "VRB"
+    return f"{_fmt_c(metar.temperature_c)} ({age}), rüzgâr {wind_direction}°/{metar.wind_speed_kt:.0f} kt"
+
+
+def _hourly_model_line(model_bundle: ModelBundle | None) -> str:
+    if model_bundle is None or not model_bundle.available_forecasts:
+        return "veri yok"
+    forecasts = [
+        forecast
+        for forecast in model_bundle.available_forecasts
+        if forecast.tmax_c is not None
+    ]
+    if not forecasts:
+        return "veri yok"
+    values = [float(forecast.tmax_c) for forecast in forecasts]
+    leaders = sorted(forecasts, key=lambda forecast: abs(float(forecast.tmax_c or 0.0) - mean(values)))[:4]
+    leader_text = ", ".join(f"{_display_model_name(forecast.model)} {_fmt_c(forecast.tmax_c)}" for forecast in leaders)
+    return f"{len(forecasts)} model, {min(values):.1f}-{max(values):.1f}°C; {leader_text}"
+
+
+def _hourly_peak_line(model_bundle: ModelBundle | None, tz: ZoneInfo) -> str:
+    if model_bundle is None:
+        return "13:30-15:30 lokal izlenir; model saatlik veri yok"
+    peaks: list[datetime] = []
+    for forecast in model_bundle.available_forecasts:
+        temp_points = [point for point in forecast.hourly if point.temperature_2m_c is not None]
+        if not temp_points:
+            continue
+        peak = max(temp_points, key=lambda point: point.temperature_2m_c or -999.0)
+        peaks.append(peak.time.astimezone(tz))
+    if not peaks:
+        return "13:30-15:30 lokal izlenir"
+    local_hours = sorted(point.hour + point.minute / 60 for point in peaks)
+    start = max(0.0, min(local_hours) - 0.5)
+    end = min(23.99, max(local_hours) + 0.5)
+    return f"{_fmt_hour(start)}-{_fmt_hour(end)} lokal"
+
+
+def _fmt_hour(value: float) -> str:
+    hour = int(value)
+    minute = int(round((value - hour) * 60))
+    if minute == 60:
+        hour += 1
+        minute = 0
+    return f"{hour:02d}:{minute:02d}"
 
 
 def _bullet(text: str) -> str:

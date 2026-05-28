@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     schedule_midday_update: str = Field(default="12:00", alias="SCHEDULE_MIDDAY_UPDATE")
     schedule_risk_update: str = Field(default="15:00", alias="SCHEDULE_RISK_UPDATE")
     schedule_result_report: str = Field(default="21:00", alias="SCHEDULE_RESULT_REPORT")
+    schedule_hourly_forecast_minute: int = Field(default=0, ge=0, le=59, alias="SCHEDULE_HOURLY_FORECAST_MINUTE")
 
     weathercom_api_key: str | None = Field(default=None, alias="WEATHERCOM_API_KEY")
     openweather_api_key: str | None = Field(default=None, alias="OPENWEATHER_API_KEY")

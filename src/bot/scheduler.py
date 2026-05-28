@@ -17,10 +17,15 @@ _DISABLE_LINK_PREVIEWS = LinkPreviewOptions(is_disabled=True)
 
 def build_scheduler(application: Application, service: ForecastService, settings: Settings) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=ZoneInfo(settings.report_timezone))
-    _add_daily_job(scheduler, settings.schedule_daily_report, _send_daily_report, application, service, "09:00")
-    _add_daily_job(scheduler, settings.schedule_midday_update, _send_daily_report, application, service, "12:00")
-    _add_daily_job(scheduler, settings.schedule_risk_update, _send_daily_report, application, service, "15:00")
-    _add_daily_job(scheduler, settings.schedule_result_report, _send_result_report, application, service, "21:00")
+    scheduler.add_job(
+        _send_hourly_forecast,
+        trigger="cron",
+        minute=settings.schedule_hourly_forecast_minute,
+        args=[application, service],
+        id="ltac_hourly_max_forecast",
+        replace_existing=True,
+        misfire_grace_time=900,
+    )
     return scheduler
 
 
@@ -53,6 +58,14 @@ async def _send_daily_report(application: Application, service: ForecastService,
     await _send_long(application, service.settings.telegram_channel_id, text)
 
 
+async def _send_hourly_forecast(application: Application, service: ForecastService) -> None:
+    if not service.settings.telegram_channel_id:
+        logger.warning("telegram channel id is not configured")
+        return
+    text = await service.render_hourly_max_forecast()
+    await _send_long(application, service.settings.telegram_channel_id, text)
+
+
 async def _send_result_report(application: Application, service: ForecastService, label: str) -> None:
     if not service.settings.telegram_channel_id:
         logger.warning("telegram channel id is not configured")
@@ -74,4 +87,3 @@ async def _send_long(application: Application, chat_id: str, text: str) -> None:
             link_preview_options=_DISABLE_LINK_PREVIEWS,
         )
         text = text[len(chunk):].lstrip()
-
