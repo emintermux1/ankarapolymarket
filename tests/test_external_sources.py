@@ -63,12 +63,12 @@ def test_noaa_raw_metar_snapshot_parses_time_and_fingerprint() -> None:
 
 
 @pytest.mark.asyncio
-async def test_aviapages_uses_bearer_header_without_committing_token(monkeypatch) -> None:
+async def test_aviapages_uses_token_header_without_committing_token(monkeypatch) -> None:
     adapter = AviationWatchAdapter(Settings(TELEGRAM_ADMIN_IDS="", AVIAPAGES_API_TOKEN="test-token"))
 
     async def fake_request_json(url: str, **kwargs):
         assert url == "https://aviapages.com/api/v1/airports/LTAC/"
-        assert kwargs["headers"] == {"Authorization": "Bearer test-token"}
+        assert kwargs["headers"] == {"Authorization": "Token test-token"}
         return {"icao": "LTAC", "name": "Ankara Esenboğa", "notams": [{"text": "RWY test NOTAM"}]}
 
     monkeypatch.setattr(adapter, "_request_json", fake_request_json)
