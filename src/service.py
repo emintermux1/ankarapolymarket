@@ -170,6 +170,13 @@ class ForecastService:
     async def render_aviation_source_alert(self, snapshot: AviationSourceSnapshot) -> str:
         return self.renderer.aviation_source_alert(snapshot)
 
+    async def render_aviation_source_digest(
+        self,
+        snapshots: list[AviationSourceSnapshot],
+        new_snapshot_keys: set[str] | None = None,
+    ) -> str:
+        return self.renderer.aviation_source_digest(snapshots, new_snapshot_keys)
+
     async def fetch_metar_alert_observations(self) -> list[METARNormalized]:
         stations = self.settings.telegram_metar_alert_station_keys
         metars = await asyncio.gather(*(self._safe_metar(station) for station in stations))
