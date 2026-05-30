@@ -73,6 +73,15 @@ def test_metar_alert_defaults_include_ltac_and_ltfm() -> None:
     assert "@metaralarms" in settings.telegram_allowed_chat_keys
 
 
+def test_nearby_sensor_points_parse_istanbul_and_ankara_defaults() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="")
+    points = settings.telegram_nearby_sensor_point_defs
+
+    assert any(point["name"] == "Istanbul Airport / Arnavutköy" and point["region"] == "istanbul" for point in points)
+    assert any(point["name"] == "Çubuk merkez" and point["region"] == "ankara" for point in points)
+    assert all(isinstance(point["latitude"], float) and isinstance(point["longitude"], float) for point in points)
+
+
 def test_telegram_channel_mode_aliases_are_normalized() -> None:
     assert (
         Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_CHANNEL_MODE="hourly").telegram_channel_mode_normalized

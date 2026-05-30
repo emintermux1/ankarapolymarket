@@ -60,6 +60,28 @@ class METARNormalized(BaseModel):
         return self.age_minutes > 90.0
 
 
+class NearbySensorSnapshot(BaseModel):
+    name: str
+    region: str
+    source: str
+    source_url: str
+    latitude: float
+    longitude: float
+    fetch_timestamp: datetime
+    observation_time: datetime | None = None
+    temperature_c: float | None = None
+    apparent_temperature_c: float | None = None
+    dew_point_c: float | None = None
+    relative_humidity: int | None = None
+    wind_direction_deg: int | None = None
+    wind_speed_kt: float | None = None
+    wind_gust_kt: float | None = None
+    pressure_hpa: float | None = None
+    precipitation_mm: float | None = None
+    cloud_cover_pct: int | None = None
+    raw_json: dict[str, Any] = Field(default_factory=dict)
+
+
 class TAFForecastPeriod(BaseModel):
     time_from: datetime
     time_to: datetime

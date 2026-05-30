@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from statistics import mean
 from typing import Any
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from src.config import Settings
@@ -12,6 +13,7 @@ from src.data_sources.schemas import (
     ModelBundle,
     ModelForecast,
     ModelHourlyPoint,
+    NearbySensorSnapshot,
     SourceHealth,
     SourceState,
 )
@@ -91,6 +93,61 @@ class OpenMeteoAdapter(HttpSource):
         super().__init__(settings)
         self.forecast_url = "https://api.open-meteo.com/v1/forecast"
         self.ensemble_url = "https://ensemble-api.open-meteo.com/v1/ensemble"
+
+    async def get_current_sensor_snapshot(
+        self,
+        *,
+        name: str,
+        region: str,
+        latitude: float,
+        longitude: float,
+    ) -> NearbySensorSnapshot:
+        variables = [
+            "temperature_2m",
+            "relative_humidity_2m",
+            "dew_point_2m",
+            "apparent_temperature",
+            "precipitation",
+            "cloud_cover",
+            "pressure_msl",
+            "surface_pressure",
+            "wind_speed_10m",
+            "wind_direction_10m",
+            "wind_gusts_10m",
+        ]
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": ",".join(variables),
+            "timezone": self.settings.report_timezone,
+            "wind_speed_unit": "kn",
+        }
+        payload = await self._request_json(self.forecast_url, params=params)
+        if not isinstance(payload, dict):
+            raise SourceError(self.source_name, "Current sensor payload is not an object")
+        current = payload.get("current") or {}
+        observed_at = _parse_current_time(current.get("time"), self.settings.report_timezone)
+        return NearbySensorSnapshot(
+            name=name,
+            region=region,
+            source=self.source_name,
+            source_url=_openmeteo_source_url(latitude, longitude, variables, self.settings.report_timezone),
+            latitude=latitude,
+            longitude=longitude,
+            fetch_timestamp=datetime.now(timezone.utc),
+            observation_time=observed_at,
+            temperature_c=_safe_float(current.get("temperature_2m")),
+            apparent_temperature_c=_safe_float(current.get("apparent_temperature")),
+            dew_point_c=_safe_float(current.get("dew_point_2m")),
+            relative_humidity=_safe_int(current.get("relative_humidity_2m")),
+            wind_direction_deg=_safe_int(current.get("wind_direction_10m")),
+            wind_speed_kt=_safe_float(current.get("wind_speed_10m")),
+            wind_gust_kt=_safe_float(current.get("wind_gusts_10m")),
+            pressure_hpa=_safe_float(current.get("pressure_msl") or current.get("surface_pressure")),
+            precipitation_mm=_safe_float(current.get("precipitation")),
+            cloud_cover_pct=_safe_int(current.get("cloud_cover")),
+            raw_json=payload,
+        )
 
     async def get_forecast(self, target_date: date) -> ModelBundle:
         models = self.settings.openmeteo_models
@@ -244,3 +301,39 @@ class OpenMeteoAdapter(HttpSource):
             if key.startswith(f"{variable}_") and key.endswith(model):
                 return key
         return None
+
+
+def _parse_current_time(value: Any, timezone_name: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).replace(tzinfo=ZoneInfo(timezone_name))
+    except ValueError:
+        return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if value in (None, "", "M"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(value: Any) -> int | None:
+    parsed = _safe_float(value)
+    return int(round(parsed)) if parsed is not None else None
+
+
+def _openmeteo_source_url(latitude: float, longitude: float, variables: list[str], timezone_name: str) -> str:
+    query = urlencode(
+        {
+            "latitude": f"{latitude:.4f}",
+            "longitude": f"{longitude:.4f}",
+            "current": ",".join(variables),
+            "timezone": timezone_name,
+            "wind_speed_unit": "kn",
+        }
+    )
+    return f"https://api.open-meteo.com/v1/forecast?{query}"

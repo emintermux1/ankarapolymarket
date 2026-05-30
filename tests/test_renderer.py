@@ -15,6 +15,7 @@ from src.data_sources.schemas import (
     ModelBundle,
     ModelForecast,
     ModelHourlyPoint,
+    NearbySensorSnapshot,
     TAFForecastPeriod,
     TAFNormalized,
 )
@@ -142,10 +143,55 @@ def test_metar_alert_includes_ltfm_sensor_fields() -> None:
     assert "LTFM YENİ METAR/SENSÖR" in text
     assert "Sıcaklık: 22.0°C" in text
     assert "Rüzgâr: 040°/12 G22 KT" in text
+    assert "AviationWeather: https://aviationweather.gov/api/data/metar?ids=LTFM&format=json" in text
+    assert "IEM ASOS: https://mesonet.agron.iastate.edu/sites/site.php?station=LTFM&network=TR__ASOS" in text
     assert "Hava olayı: SHRA" in text
     assert "Ek sensör: tip=METAR, SLP=1014.2" in text
     assert "Yağış/kar: 3s=0.4" in text
     assert "Raw: METAR LTFM" in text
+
+
+def test_metar_alert_includes_nearby_public_sensor_links_and_deltas() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 27, 10, 5, tzinfo=timezone.utc)
+    metar = METARNormalized(
+        source="AviationWeather",
+        station="LTAC",
+        fetch_timestamp=now,
+        observation_time=now,
+        temperature_c=24.0,
+        dew_point_c=10.0,
+        relative_humidity=41,
+        wind_direction_deg=300,
+        wind_speed_kt=8.0,
+        pressure_hpa=1015.0,
+        visibility_m=9999,
+        cloud_layers=[],
+        raw_text="METAR LTAC 271005Z 30008KT 9999 24/10 Q1015",
+    )
+    sensor = NearbySensorSnapshot(
+        name="Çubuk merkez",
+        region="ankara",
+        source="Open-Meteo",
+        source_url="https://api.open-meteo.com/v1/forecast?latitude=40.2386&longitude=33.0322",
+        latitude=40.2386,
+        longitude=33.0322,
+        fetch_timestamp=now,
+        observation_time=now,
+        temperature_c=25.2,
+        apparent_temperature_c=24.8,
+        relative_humidity=37,
+        wind_direction_deg=290,
+        wind_speed_kt=9.0,
+        precipitation_mm=0.0,
+    )
+
+    text = renderer.metar_alert(metar, nearby_sensors=[sensor])
+
+    assert "Yakın canlı sensörler:" in text
+    assert "Çubuk merkez: 25.2°C · METAR farkı +1.2°C" in text
+    assert "Kaynak: https://api.open-meteo.com/v1/forecast?latitude=40.2386" in text
 
 
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:

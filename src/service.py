@@ -23,6 +23,7 @@ from src.data_sources.schemas import (
     METARNormalized,
     ModelBundle,
     ModelForecast,
+    NearbySensorSnapshot,
     SourceHealth,
     TAFNormalized,
 )
@@ -45,6 +46,7 @@ class ForecastContext:
     market: MarketSnapshot | None
     forum: ForumAnalysis | None = None
     recent_observations: list[dict] | None = None
+    nearby_sensors: list[NearbySensorSnapshot] | None = None
     previous_analysis: ForecastAnalysis | None = None
     previous_model_tmax_c: dict[str, float | None] | None = None
 
@@ -73,13 +75,14 @@ class ForecastService:
 
     async def build_forecast_context(self, target_date: date | None = None, report_label: str = "manual") -> ForecastContext:
         target = target_date or self.default_target_date()
-        metar, taf, bundle, market, forum, recent_observations = await asyncio.gather(
+        metar, taf, bundle, market, forum, recent_observations, nearby_sensors = await asyncio.gather(
             self._safe_metar(),
             self._safe_taf(),
             self._safe_models(target),
             self._safe_market(target),
             self._safe_forum(target),
             self._safe_recent_observations(target),
+            self._safe_nearby_sensor_snapshots("ankara"),
         )
         previous_model_tmax_c = self.repository.latest_model_tmax_by_target(target)
         if metar:
@@ -109,6 +112,7 @@ class ForecastService:
             market=market,
             forum=forum,
             recent_observations=recent_observations,
+            nearby_sensors=nearby_sensors,
             previous_analysis=previous_analysis,
             previous_model_tmax_c=previous_model_tmax_c,
         )
@@ -123,6 +127,7 @@ class ForecastService:
             market=ctx.market,
             forum=ctx.forum,
             recent_observations=ctx.recent_observations,
+            nearby_sensors=ctx.nearby_sensors,
             report_label=report_label,
             previous_analysis=ctx.previous_analysis,
             previous_model_tmax_c=ctx.previous_model_tmax_c,
@@ -137,6 +142,7 @@ class ForecastService:
             model_bundle=ctx.model_bundle,
             market=ctx.market,
             recent_observations=ctx.recent_observations,
+            nearby_sensors=ctx.nearby_sensors,
             previous_analysis=ctx.previous_analysis,
         )
 
@@ -152,7 +158,8 @@ class ForecastService:
         return self.renderer.now_report(metar)
 
     async def render_metar_alert(self, metar: METARNormalized) -> str:
-        return self.renderer.metar_alert(metar)
+        nearby_sensors = await self._safe_nearby_sensor_snapshots(_nearby_region_for_station(metar.station))
+        return self.renderer.metar_alert(metar, nearby_sensors=nearby_sensors)
 
     async def fetch_metar_alert_observations(self) -> list[METARNormalized]:
         stations = self.settings.telegram_metar_alert_station_keys
@@ -161,6 +168,16 @@ class ForecastService:
         for metar in observations:
             self.repository.save_observation(metar)
         return observations
+
+    async def fetch_nearby_sensor_snapshots(self, region: str | None = None) -> list[NearbySensorSnapshot]:
+        region_key = region.lower() if region else None
+        points = [
+            point
+            for point in self.settings.telegram_nearby_sensor_point_defs
+            if region_key is None or str(point["region"]).lower() == region_key
+        ]
+        snapshots = await asyncio.gather(*(self._safe_current_sensor_snapshot(point) for point in points))
+        return [snapshot for snapshot in snapshots if snapshot is not None]
 
     async def render_taf(self) -> str:
         taf = await self._safe_taf()
@@ -371,6 +388,23 @@ class ForecastService:
         except Exception:
             return None
 
+    async def _safe_nearby_sensor_snapshots(self, region: str | None = None) -> list[NearbySensorSnapshot]:
+        try:
+            return await self.fetch_nearby_sensor_snapshots(region)
+        except Exception:
+            return []
+
+    async def _safe_current_sensor_snapshot(self, point: dict[str, str | float]) -> NearbySensorSnapshot | None:
+        try:
+            return await self.openmeteo.get_current_sensor_snapshot(
+                name=str(point["name"]),
+                region=str(point["region"]),
+                latitude=float(point["latitude"]),
+                longitude=float(point["longitude"]),
+            )
+        except Exception:
+            return None
+
     async def _safe_recent_observations(self, target_date: date) -> list[dict]:
         try:
             tz = ZoneInfo(self.settings.report_timezone)
@@ -386,4 +420,13 @@ class ForecastService:
 
 
 async def _none() -> None:
+    return None
+
+
+def _nearby_region_for_station(station: str) -> str | None:
+    station_key = station.strip().upper()
+    if station_key in {"LTFM", "LTBA", "LTFJ", "LTBU"}:
+        return "istanbul"
+    if station_key in {"LTAC", "LTAD", "LTAB"}:
+        return "ankara"
     return None
