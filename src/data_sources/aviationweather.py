@@ -22,11 +22,12 @@ class AviationWeatherAdapter(HttpSource):
         super().__init__(settings)
         self.base_url = "https://aviationweather.gov/api/data"
 
-    async def get_metar(self) -> METARNormalized:
+    async def get_metar(self, station: str | None = None) -> METARNormalized:
+        station_id = (station or self.settings.ltac_icao).strip().upper()
         url = f"{self.base_url}/metar"
         payload = await self._request_json(
             url,
-            params={"ids": self.settings.ltac_icao, "format": "json"},
+            params={"ids": station_id, "format": "json"},
         )
         if not isinstance(payload, list) or not payload:
             raise SourceError(self.source_name, "METAR payload is empty")
@@ -45,6 +46,7 @@ class AviationWeatherAdapter(HttpSource):
         return METARNormalized(
             fetch_timestamp=datetime.now(timezone.utc),
             observation_time=observation_time,
+            station=str(row.get("icaoId") or station_id).upper(),
             temperature_c=temperature,
             dew_point_c=dew_point,
             relative_humidity=relative_humidity_from_temp_dewpoint(temperature, dew_point),
@@ -58,11 +60,12 @@ class AviationWeatherAdapter(HttpSource):
             raw_json=row,
         )
 
-    async def get_taf(self) -> TAFNormalized:
+    async def get_taf(self, station: str | None = None) -> TAFNormalized:
+        station_id = (station or self.settings.ltac_icao).strip().upper()
         url = f"{self.base_url}/taf"
         payload = await self._request_json(
             url,
-            params={"ids": self.settings.ltac_icao, "format": "json"},
+            params={"ids": station_id, "format": "json"},
         )
         if not isinstance(payload, list) or not payload:
             raise SourceError(self.source_name, "TAF payload is empty")
@@ -94,6 +97,7 @@ class AviationWeatherAdapter(HttpSource):
             issue_time=_parse_iso(row.get("issueTime")) or _parse_iso(row.get("bulletinTime")) or datetime.now(timezone.utc),
             valid_from=_epoch_to_utc(row.get("validTimeFrom")),
             valid_to=_epoch_to_utc(row.get("validTimeTo")),
+            station=str(row.get("icaoId") or station_id).upper(),
             raw_text=str(row.get("rawTAF") or ""),
             periods=periods,
             raw_json=row,
@@ -161,4 +165,3 @@ def _parse_visibility_m(value: Any, raw_text: str) -> int | None:
         return int(round(miles * 1609.344))
     except ValueError:
         return None
-

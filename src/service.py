@@ -129,16 +129,38 @@ class ForecastService:
         )
         return report
 
+    async def render_hourly_max_forecast(self, target_date: date | None = None, report_label: str = "hourly") -> str:
+        ctx = await self.build_forecast_context(target_date=target_date, report_label=report_label)
+        return self.renderer.hourly_max_forecast(
+            analysis=ctx.analysis,
+            metar=ctx.metar,
+            model_bundle=ctx.model_bundle,
+            market=ctx.market,
+            recent_observations=ctx.recent_observations,
+            previous_analysis=ctx.previous_analysis,
+        )
+
     async def render_forum(self, target_date: date | None = None) -> str:
         target = target_date or self.default_target_date()
         forum = await self._safe_forum(target)
         return self.renderer.forum_report(forum)
 
-    async def render_now(self) -> str:
-        metar = await self._safe_metar()
+    async def render_now(self, station: str | None = None) -> str:
+        metar = await self._safe_metar(station)
         if metar:
             self.repository.save_observation(metar)
         return self.renderer.now_report(metar)
+
+    async def render_metar_alert(self, metar: METARNormalized) -> str:
+        return self.renderer.metar_alert(metar)
+
+    async def fetch_metar_alert_observations(self) -> list[METARNormalized]:
+        stations = self.settings.telegram_metar_alert_station_keys
+        metars = await asyncio.gather(*(self._safe_metar(station) for station in stations))
+        observations = [metar for metar in metars if metar is not None]
+        for metar in observations:
+            self.repository.save_observation(metar)
+        return observations
 
     async def render_taf(self) -> str:
         taf = await self._safe_taf()
@@ -254,21 +276,21 @@ class ForecastService:
             self.repository.save_source_health(item)
         return [*health, *optional_health]
 
-    async def _safe_metar(self) -> METARNormalized | None:
+    async def _safe_metar(self, station: str | None = None) -> METARNormalized | None:
         try:
-            return await self.aviation.get_metar()
+            return await self.aviation.get_metar(station)
         except Exception:
             try:
-                return await self.checkwx.get_metar()
+                return await self.checkwx.get_metar(station)
             except Exception:
                 return None
 
-    async def _safe_taf(self) -> TAFNormalized | None:
+    async def _safe_taf(self, station: str | None = None) -> TAFNormalized | None:
         try:
-            return await self.aviation.get_taf()
+            return await self.aviation.get_taf(station)
         except Exception:
             try:
-                return await self.checkwx.get_taf()
+                return await self.checkwx.get_taf(station)
             except Exception:
                 return None
 

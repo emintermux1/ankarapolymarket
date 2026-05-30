@@ -13,10 +13,11 @@ class Base(DeclarativeBase):
 
 class Observation(Base):
     __tablename__ = "observations"
+    __table_args__ = (UniqueConstraint("station", "observation_time"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fetch_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    observation_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), unique=True, nullable=False)
+    observation_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     station: Mapped[str] = mapped_column(String(16), nullable=False, default="LTAC")
     temperature_c: Mapped[float] = mapped_column(Float, nullable=False)
     dew_point_c: Mapped[float] = mapped_column(Float, nullable=False)
@@ -130,6 +131,20 @@ class SourceStatus(Base):
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     latency_ms: Mapped[float | None] = mapped_column(Float)
     message: Mapped[str | None] = mapped_column(Text)
+
+
+class TelegramDelivery(Base):
+    __tablename__ = "telegram_deliveries"
+    __table_args__ = (UniqueConstraint("delivery_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    delivery_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    chat_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
 
 class NotificationState(Base):

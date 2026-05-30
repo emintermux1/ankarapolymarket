@@ -13,7 +13,12 @@ from src.service import ForecastService
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LTAC Ankara temperature intelligence bot")
-    parser.add_argument("command", nargs="?", default="bot", choices=["bot", "report", "signals", "aviation", "sources", "result"])
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="bot",
+        choices=["bot", "web", "report", "hourly", "metars", "signals", "aviation", "forum", "sources", "result"],
+    )
     parser.add_argument("--date", dest="target_date", help="Target date as YYYY-MM-DD")
     parser.add_argument("--host", default="0.0.0.0", help="Web server host")
     parser.add_argument("--port", type=int, default=8000, help="Web server port")
@@ -30,6 +35,14 @@ def main() -> None:
         return
     if args.command == "signals":
         print(asyncio.run(service.render_advanced_signals(target_date=target)))
+        return
+    if args.command == "hourly":
+        print(asyncio.run(service.render_hourly_max_forecast(target_date=target, report_label="cli-hourly")))
+        return
+    if args.command == "metars":
+        metars = asyncio.run(service.fetch_metar_alert_observations())
+        reports = [asyncio.run(service.render_metar_alert(metar)) for metar in metars]
+        print("\n\n".join(reports) if reports else "LTAC/LTFM METAR verisi yok.")
         return
     if args.command == "aviation":
         print(asyncio.run(service.render_aviation(target_date=target)))

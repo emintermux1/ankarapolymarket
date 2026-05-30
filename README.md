@@ -11,8 +11,8 @@ Ankara Esenboğa (LTAC) günlük maksimum sıcaklık tahmini, model karşılaşt
 - Polymarket Gamma/CLOB/Data read-only reader
 - SQLAlchemy database modeli: observations, tafs, model_snapshots, forecast_runs, market_snapshots, daily_predictions, actual_results, source_status, backtest_scores, model_weights, analog_days
 - Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, basınç/üst seviye, üst seviye/profil, cloud/radiation, rain/soil, confidence
-- Telegram komutları: `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/taf`, `/models`, `/signals`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
-- APScheduler: 09:00 kısa Telegram tahmini, anlamlı tahmin değişirse kanal uyarısı, market sonucu kesinleşince tek resolve bildirimi
+- Telegram komutları: `/hourly`, `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/metars`, `/taf`, `/models`, `/signals`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`
+- APScheduler: varsayılan kanal modu `hourly_max`; 08:00-20:00 arasında saat başı tek kısa maksimum sıcaklık tahmini ve yeni LTAC/LTFM METAR geldiği anda kısa sensör alarmı gönderir. Eski 09:00/12:00/15:00/21:00 raporları için `TELEGRAM_CHANNEL_MODE=legacy_reports` kullanılır.
 - FastAPI dashboard: LTAC model stack, METAR/TAF, Polymarket bracket edge, risk board, kaynak/env matrisi
 - Wunderground final result: API key yoksa scraper + admin manual fallback
 
@@ -43,9 +43,23 @@ ANKARA_TELEGRAM_BOT_TOKEN=...
 ANKARA_TELEGRAM_CHANNEL_ID=@ankarapm
 ANKARA_TELEGRAM_ADMIN_IDS=1374723312
 ANKARA_TELEGRAM_ALLOWED_CHAT_IDS=@ankarapm,1374723312
+TELEGRAM_CHANNEL_MODE=hourly_max
+ANKARA_TELEGRAM_HOURLY_FORECAST_ENABLED=true
+ANKARA_TELEGRAM_HOURLY_FORECAST_CHANNEL_ID=@ankarapm
+TELEGRAM_HOURLY_FORECAST_START_HOUR=08
+TELEGRAM_HOURLY_FORECAST_END_HOUR=20
+TELEGRAM_HOURLY_FORECAST_MINUTE=00
+ANKARA_TELEGRAM_METAR_ALERTS_ENABLED=true
+ANKARA_TELEGRAM_METAR_ALERT_CHANNEL_ID=@ankarapm
+ANKARA_TELEGRAM_METAR_ALERT_STATION_IDS=LTAC,LTFM
+ANKARA_TELEGRAM_METAR_ALERT_INTERVAL_SECONDS=60
 ```
 
 `ANKARA_TELEGRAM_*` değişkenleri aynı sunucuda başka botlar varsa özellikle tercih edilir; geriye dönük uyumluluk için eski `TELEGRAM_*` adları hâlâ okunur ama Ankara prefix'i varsa o kazanır.
+
+Saatlik kanal mesajı uzun analiz göndermez; yalnız bugünün beklenen resmi maksimum derecesini, model merkezini, canlı/gün içi maksimumu, güveni, yuvarlama sınır riskini ve Polymarket bracket/fair/edge özetini verir. `TELEGRAM_CHANNEL_MODE=both` hem saatlik kısa tahmini hem legacy raporları açar.
+
+METAR alarmı her 60 saniyede LTAC ve LTFM’i kontrol eder; aynı gözlem zamanı için tekrar göndermez. Mesaj sıcaklık/çiy/nem, rüzgâr/gust, basınç, görüş, bulut, hava olayı, yağış/kar ve raw METAR satırını içerir.
 
 Docker:
 

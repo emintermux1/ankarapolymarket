@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import create_engine, desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -31,6 +32,7 @@ from src.db.models import (
     Observation,
     SourceStatus,
     TAF,
+    TelegramDelivery,
 )
 
 
@@ -42,11 +44,16 @@ class Repository:
     def init_db(self) -> None:
         Base.metadata.create_all(self.engine)
 
-    def save_observation(self, metar: METARNormalized) -> None:
+    def save_observation(self, metar: METARNormalized) -> bool:
         with self.session_factory() as session:
-            exists = session.scalar(select(Observation).where(Observation.observation_time == metar.observation_time))
+            exists = session.scalar(
+                select(Observation).where(
+                    Observation.station == metar.station,
+                    Observation.observation_time == metar.observation_time,
+                )
+            )
             if exists:
-                return
+                return False
             session.add(
                 Observation(
                     fetch_timestamp=metar.fetch_timestamp,
@@ -65,7 +72,12 @@ class Repository:
                     raw_json=metar.raw_json,
                 )
             )
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                return False
+            return True
 
     def save_taf(self, taf: TAFNormalized) -> None:
         with self.session_factory() as session:
@@ -316,6 +328,40 @@ class Repository:
                 .limit(1)
             )
         return row.payload if row else None
+
+    def telegram_delivery_exists(self, key: str) -> bool:
+        with self.session_factory() as session:
+            row = session.scalar(select(TelegramDelivery.id).where(TelegramDelivery.delivery_key == key).limit(1))
+            return row is not None
+
+    def save_telegram_delivery(
+        self,
+        *,
+        key: str,
+        chat_id: str,
+        kind: str,
+        target_date: date,
+        scheduled_for: datetime,
+        payload: dict[str, Any],
+    ) -> bool:
+        with self.session_factory() as session:
+            session.add(
+                TelegramDelivery(
+                    delivery_key=key,
+                    chat_id=chat_id,
+                    kind=kind,
+                    target_date=target_date,
+                    scheduled_for=scheduled_for,
+                    sent_at=datetime.now(timezone.utc),
+                    payload=payload,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                return False
+            return True
 
 
 def create_repository(settings: Settings) -> Repository:

@@ -20,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply(
         update,
         "LTAC Ankara Esenboğa bot aktif. Komutlar: "
-        "/today /aviation /ltac /now /metar /taf /models /signals /market /edge /backtest /sources /chart /result",
+        "/hourly /today /aviation /ltac /now /metar /metars /taf /models /signals /market /edge /backtest /sources /chart /result",
     )
 
 
@@ -32,15 +32,36 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _reply_long(update, await service.render_daily_report(target_date=target, report_label="command"))
 
 
+async def hourly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    target = _parse_date_arg(context.args) if context.args else None
+    await _reply_long(update, await service.render_hourly_max_forecast(target_date=target, report_label="command-hourly"))
+
+
 async def now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
     if not _is_allowed_chat(update, service):
         return
-    await _reply_long(update, await service.render_now())
+    station = context.args[0].upper() if context.args else None
+    await _reply_long(update, await service.render_now(station=station))
 
 
 async def metar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await now(update, context)
+
+
+async def metars(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    metars = await service.fetch_metar_alert_observations()
+    if not metars:
+        await _reply_long(update, "LTAC/LTFM METAR verisi yok.")
+        return
+    reports = [await service.render_metar_alert(metar) for metar in metars]
+    await _reply_long(update, "\n\n".join(reports))
 
 
 async def taf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

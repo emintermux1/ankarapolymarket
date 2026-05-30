@@ -104,6 +104,45 @@ class TelegramReportRenderer:
             ]
         )
 
+    def hourly_max_forecast(
+        self,
+        *,
+        analysis: ForecastAnalysis,
+        metar: METARNormalized | None,
+        model_bundle: ModelBundle | None,
+        market: MarketSnapshot | None,
+        recent_observations: list[dict[str, Any]] | None = None,
+        previous_analysis: ForecastAnalysis | None = None,
+    ) -> str:
+        report_time = analysis.generated_at.astimezone(self.tz)
+        settlement = _nearest_settlement_integer(analysis.final_tmax_c)
+        observed_peak = _observed_peak_c(recent_observations or [], metar)
+        trend = _recent_temperature_trend(recent_observations or [], metar)
+        return "\n".join(
+            [
+                f"🎯 {report_time:%H:00} SAAT BAŞI MAX TAHMİNİ · LTAC",
+                "",
+                f"Bugünün göreceği max: {_fmt_integer_c(settlement)}",
+                f"Model merkezi: {_fmt_c_with_trend(analysis.final_tmax_c, previous_analysis.final_tmax_c if previous_analysis else None)}",
+                f"Ana aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}",
+                "",
+                f"Canlı sıcaklık: {_fmt_c(metar.temperature_c if metar else None)}",
+                f"Gün içi ölçülen max: {_fmt_c(observed_peak)}",
+                _remaining_warming_line(analysis, observed_peak),
+                f"Son trend: {trend}",
+                "",
+                f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})",
+                f"Sınır riski: {_boundary_risk(analysis)}",
+                _rounding_distance_line(analysis.final_tmax_c),
+                "",
+                _hourly_market_line(analysis, market),
+                _hourly_decision_line(analysis, market, self.settings),
+                "",
+                f"Sonraki kontrol: {_next_hour_label(report_time)}",
+                "Not: Yatırım tavsiyesi değildir; final WU/NOAA kaydıyla teyit edilir.",
+            ]
+        )
+
     def aviation_report(
         self,
         *,
@@ -150,7 +189,29 @@ class TelegramReportRenderer:
     def now_report(self, metar: METARNormalized | None) -> str:
         if metar is None:
             return "LTAC METAR verisi yok."
-        return "\n".join(["LTAC SON GÖZLEM", *self._metar_lines(metar)])
+        return "\n".join([f"{metar.station} SON GÖZLEM", *self._metar_lines(metar)])
+
+    def metar_alert(self, metar: METARNormalized) -> str:
+        observed_local = metar.observation_time.astimezone(self.tz)
+        fetched_local = metar.fetch_timestamp.astimezone(self.tz)
+        return "\n".join(
+            [
+                f"🚨 {metar.station} YENİ METAR/SENSÖR",
+                f"Zaman: {observed_local:%Y-%m-%d %H:%M} {self.tz.key} · {metar.observation_time:%H:%M} UTC",
+                f"Kaynak: {metar.source} · çekim {fetched_local:%H:%M:%S}",
+                "",
+                f"Sıcaklık: {metar.temperature_c:.1f}°C · çiy {metar.dew_point_c:.1f}°C · nem %{metar.relative_humidity if metar.relative_humidity is not None else 'veri yok'}",
+                f"Rüzgâr: {_metar_wind_text(metar)}",
+                f"Basınç: {_fmt_num(metar.pressure_hpa)} hPa",
+                f"Görüş: {_format_visibility_m(metar.visibility_m)}",
+                f"Bulut: {_format_clouds(metar.cloud_layers)}",
+                f"Hava olayı: {_metar_weather_text(metar)}",
+                "",
+                *_metar_extra_sensor_lines(metar),
+                "",
+                f"Raw: {metar.raw_text or 'veri yok'}",
+            ]
+        )
 
     def taf_report(self, taf: TAFNormalized | None) -> str:
         if taf is None:
@@ -869,6 +930,10 @@ def _fmt_c(value: float | None) -> str:
     return f"{value:.1f}°C" if value is not None else "veri yok"
 
 
+def _fmt_integer_c(value: int | None) -> str:
+    return f"{value}°C" if value is not None else "veri yok"
+
+
 def _fmt_c_with_trend(value: float | None, previous: float | None) -> str:
     text = _fmt_c(value)
     if value is None or previous is None:
@@ -944,6 +1009,33 @@ def _best_market_candidate(analysis: ForecastAnalysis, market: MarketSnapshot | 
     return best
 
 
+def _forecast_market_candidate(analysis: ForecastAnalysis, market: MarketSnapshot | None) -> tuple[str, float | None, float | None, float | None] | None:
+    if market is None or not market.valid_for_target:
+        return None
+    settlement = _nearest_settlement_integer(analysis.final_tmax_c)
+    matching = None
+    if settlement is not None:
+        for outcome in market.outcomes:
+            if _bracket_integer(outcome.bracket) == settlement:
+                matching = outcome
+                break
+    if matching is None:
+        candidate = _best_market_candidate(analysis, market)
+        if candidate is None:
+            return None
+        edge, bracket, fair, implied = candidate
+        return bracket, fair, implied, edge
+    fair = analysis.fair_probabilities.get(matching.bracket)
+    implied = matching.implied_probability
+    edge = fair - implied if fair is not None and implied is not None else None
+    return matching.bracket, fair, implied, edge
+
+
+def _bracket_integer(bracket: str) -> int | None:
+    match = __import__("re").search(r"-?\d+", bracket)
+    return int(match.group(0)) if match else None
+
+
 def _boundary_risk(analysis: ForecastAnalysis) -> str:
     if analysis.final_tmax_c is None:
         return "veri yok"
@@ -954,6 +1046,82 @@ def _boundary_risk(analysis: ForecastAnalysis) -> str:
     if nearest_half_degree_distance <= 0.45 or sigma >= 0.9:
         return "ORTA"
     return "DÜŞÜK"
+
+
+def _observed_peak_c(rows: list[dict[str, Any]], metar: METARNormalized | None) -> float | None:
+    values: list[float] = []
+    for row in rows:
+        for key in ("tmpc", "temperature_c", "temp_c"):
+            value = _safe_float(row.get(key))
+            if value is not None:
+                values.append(value)
+                break
+    if metar is not None:
+        values.append(metar.temperature_c)
+    return max(values) if values else None
+
+
+def _remaining_warming_line(analysis: ForecastAnalysis, observed_peak_c: float | None) -> str:
+    if analysis.final_tmax_c is None or observed_peak_c is None:
+        return "Kalan ısınma payı: veri yok"
+    remaining = max(0.0, analysis.final_tmax_c - observed_peak_c)
+    return f"Kalan ısınma payı: {remaining:.1f}°C"
+
+
+def _rounding_distance_line(final_tmax_c: float | None) -> str:
+    if final_tmax_c is None:
+        return "Yuvarlama sınırı: veri yok"
+    settlement = _settlement_integer_from_reported_temp(final_tmax_c)
+    lower_boundary = settlement - 0.5
+    upper_boundary = settlement + 0.5
+    down_delta = final_tmax_c - lower_boundary
+    up_delta = upper_boundary - final_tmax_c
+    if down_delta <= up_delta:
+        return f"Yuvarlama sınırı: {settlement - 1}°C'ye düşmek için -{down_delta:.1f}°C pay var"
+    return f"Yuvarlama sınırı: {settlement + 1}°C için +{up_delta:.1f}°C gerekir"
+
+
+def _hourly_market_line(analysis: ForecastAnalysis, market: MarketSnapshot | None) -> str:
+    candidate = _forecast_market_candidate(analysis, market)
+    if candidate is None:
+        return "Polymarket: market/fiyat verisi yok"
+    bracket, fair, implied, edge = candidate
+    parts = [bracket]
+    if implied is not None:
+        parts.append(f"piyasa {_fmt_cents(implied)}")
+    if fair is not None:
+        parts.append(f"bot fair {_fmt_pct(fair)}")
+    if edge is not None:
+        parts.append(f"edge {_fmt_pp(edge)}")
+    return f"Polymarket: {' · '.join(parts)}"
+
+
+def _hourly_decision_line(analysis: ForecastAnalysis, market: MarketSnapshot | None, settings: Settings) -> str:
+    if analysis.final_tmax_c is None:
+        return "Karar: BET YOK — tahmin verisi eksik"
+    boundary = _boundary_risk(analysis)
+    if analysis.confidence_score < settings.telegram_hourly_forecast_no_bet_confidence:
+        return "Karar: BET YOK — güven çok düşük"
+    if analysis.model_spread_c is not None and analysis.model_spread_c >= settings.telegram_hourly_forecast_model_spread_c:
+        return f"Karar: BEKLE — model farkı {analysis.model_spread_c:.1f}°C"
+    candidate = _forecast_market_candidate(analysis, market)
+    settlement = _nearest_settlement_integer(analysis.final_tmax_c)
+    if candidate is None:
+        return f"Karar: {settlement}°C ana senaryo — piyasa edge verisi yok"
+    bracket, fair, implied, edge = candidate
+    min_edge = settings.telegram_hourly_forecast_min_edge_pp / 100.0
+    if edge is None or fair is None or implied is None:
+        return f"Karar: {bracket} ana senaryo — fiyat/fair eksik"
+    if edge >= min_edge and analysis.confidence_score >= settings.telegram_hourly_forecast_min_confidence and boundary != "YÜKSEK":
+        return f"Karar: {bracket} güçlü aday — manuel onay gerekir"
+    if boundary == "YÜKSEK":
+        return f"Karar: {bracket} ana senaryo ama HEDGE/BEKLE — sınır riski yüksek"
+    return f"Karar: {bracket} ana senaryo — edge eşiğin altında"
+
+
+def _next_hour_label(report_time: datetime) -> str:
+    next_hour = (report_time + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    return f"{next_hour:%H:%M}"
 
 
 def _expected_profit_usd(stake_usd: float, fair_probability: float, yes_price: float) -> float | None:
@@ -1088,6 +1256,78 @@ def _format_clouds(clouds: list[dict]) -> str:
     if not clouds:
         return "veri yok"
     return ", ".join(f"{cloud.get('cover', '?')}{cloud.get('base', '')}" for cloud in clouds)
+
+
+def _metar_wind_text(metar: METARNormalized) -> str:
+    direction = f"{metar.wind_direction_deg:03d}°" if metar.wind_direction_deg is not None else "VRB"
+    gust = f" G{metar.wind_gust_kt:.0f}" if metar.wind_gust_kt is not None else ""
+    return f"{direction}/{metar.wind_speed_kt:.0f}{gust} KT"
+
+
+def _format_visibility_m(value: int | None) -> str:
+    if value is None:
+        return "veri yok"
+    if value >= 9999:
+        return f"10 km+ ({value} m)"
+    return f"{value} m"
+
+
+def _metar_weather_text(metar: METARNormalized) -> str:
+    raw = metar.raw_json or {}
+    wx = raw.get("wxString") or raw.get("flight_category")
+    if wx:
+        return str(wx)
+    conditions = raw.get("conditions")
+    if isinstance(conditions, list) and conditions:
+        parts = []
+        for item in conditions:
+            if isinstance(item, dict):
+                parts.append(str(item.get("code") or item.get("text") or item.get("summary") or item))
+            else:
+                parts.append(str(item))
+        return ", ".join(parts)
+    return "yok"
+
+
+def _metar_extra_sensor_lines(metar: METARNormalized) -> list[str]:
+    raw = metar.raw_json or {}
+    groups = [
+        (
+            "Ek sensör",
+            [
+                ("tip", raw.get("metarType")),
+                ("SLP", raw.get("slp")),
+                ("basınç trend", raw.get("presTend")),
+                ("dikey görüş", raw.get("vertVis")),
+                ("QC", raw.get("qcField")),
+            ],
+        ),
+        (
+            "Yağış/kar",
+            [
+                ("anlık", raw.get("precip")),
+                ("3s", raw.get("pcp3hr")),
+                ("6s", raw.get("pcp6hr")),
+                ("24s", raw.get("pcp24hr")),
+                ("kar", raw.get("snow")),
+            ],
+        ),
+        (
+            "Sıcaklık uçları",
+            [
+                ("maxT", raw.get("maxT")),
+                ("minT", raw.get("minT")),
+                ("maxT24", raw.get("maxT24")),
+                ("minT24", raw.get("minT24")),
+            ],
+        ),
+    ]
+    lines = []
+    for label, values in groups:
+        parts = [f"{key}={value}" for key, value in values if value not in (None, "", "M")]
+        if parts:
+            lines.append(f"{label}: {', '.join(parts)}")
+    return lines or ["Ek sensör: normalized METAR alanları dışında ek ham sensör yok"]
 
 
 def _bundle_values(bundle: ModelBundle, field: str) -> list[float]:

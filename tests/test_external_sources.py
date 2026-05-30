@@ -6,6 +6,7 @@ import pytest
 
 from src.config import Settings
 from src.data_sources.base import SourceError
+from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
@@ -13,6 +14,37 @@ from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
+
+
+@pytest.mark.asyncio
+async def test_aviationweather_metar_accepts_ltfm_station(monkeypatch) -> None:
+    adapter = AviationWeatherAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["params"]["ids"] == "LTFM"
+        return [
+            {
+                "icaoId": "LTFM",
+                "reportTime": "2026-05-27T10:05:00Z",
+                "temp": 22,
+                "dewp": 13,
+                "wdir": 40,
+                "wspd": 12,
+                "wgst": 22,
+                "altim": 1014,
+                "visib": "6+",
+                "clouds": [{"cover": "SCT", "base": 2500}],
+                "rawOb": "METAR LTFM 271005Z 04012G22KT 9999 SCT025 22/13 Q1014",
+            }
+        ]
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    metar = await adapter.get_metar("ltfm")
+
+    assert metar.station == "LTFM"
+    assert metar.temperature_c == 22.0
+    assert metar.wind_gust_kt == 22.0
 
 
 @pytest.mark.asyncio

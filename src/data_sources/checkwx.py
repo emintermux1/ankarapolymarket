@@ -23,14 +23,15 @@ class CheckWXAdapter(HttpSource):
         super().__init__(settings)
         self.base_url = "https://api.checkwx.com"
 
-    async def get_metar(self) -> METARNormalized:
-        row = await self._decoded("metar")
+    async def get_metar(self, station: str | None = None) -> METARNormalized:
+        station_id = (station or self.settings.ltac_icao).strip().upper()
+        row = await self._decoded("metar", station_id)
         wind = row.get("wind") or {}
         barometer = row.get("barometer") or {}
         visibility = row.get("visibility") or {}
         return METARNormalized(
             source=self.source_name,
-            station=str(row.get("icao") or self.settings.ltac_icao),
+            station=str(row.get("icao") or station_id).upper(),
             fetch_timestamp=datetime.now(timezone.utc),
             observation_time=_parse_iso(row.get("observed")) or datetime.now(timezone.utc),
             temperature_c=float((row.get("temperature") or {}).get("celsius")),
@@ -46,8 +47,9 @@ class CheckWXAdapter(HttpSource):
             raw_json=row,
         )
 
-    async def get_taf(self) -> TAFNormalized:
-        row = await self._decoded("taf")
+    async def get_taf(self, station: str | None = None) -> TAFNormalized:
+        station_id = (station or self.settings.ltac_icao).strip().upper()
+        row = await self._decoded("taf", station_id)
         periods = []
         for item in row.get("forecast") or []:
             if not isinstance(item, dict):
@@ -72,7 +74,7 @@ class CheckWXAdapter(HttpSource):
         base_period = row.get("period") or {}
         return TAFNormalized(
             source=self.source_name,
-            station=str(row.get("icao") or self.settings.ltac_icao),
+            station=str(row.get("icao") or station_id).upper(),
             fetch_timestamp=datetime.now(timezone.utc),
             issue_time=_parse_iso(row.get("issued")) or datetime.now(timezone.utc),
             valid_from=_parse_iso(base_period.get("from")) or datetime.now(timezone.utc),
@@ -93,14 +95,15 @@ class CheckWXAdapter(HttpSource):
         except Exception as exc:
             return SourceHealth(source=self.source_name, state=SourceState.DOWN, message=str(exc))
 
-    async def _decoded(self, report_type: str) -> dict[str, Any]:
+    async def _decoded(self, report_type: str, station: str | None = None) -> dict[str, Any]:
         if not self.settings.checkwx_api_key:
             raise SourceError(self.source_name, "CHECKWX_API_KEY not configured")
+        station_id = (station or self.settings.ltac_icao).strip().upper()
 
         async def do_request() -> dict[str, Any]:
             async with httpx.AsyncClient(timeout=self.settings.http_timeout_seconds, follow_redirects=True) as client:
                 response = await client.get(
-                    f"{self.base_url}/{report_type}/{self.settings.ltac_icao}/decoded",
+                    f"{self.base_url}/{report_type}/{station_id}/decoded",
                     headers={"X-API-Key": self.settings.checkwx_api_key},
                 )
                 response.raise_for_status()
