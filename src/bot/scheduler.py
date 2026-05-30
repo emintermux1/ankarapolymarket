@@ -24,6 +24,8 @@ def build_scheduler(application: Application, service: ForecastService, settings
     mode = settings.telegram_channel_mode_normalized
     if settings.telegram_metar_alerts_enabled:
         _add_metar_alert_job(scheduler, application, service, settings)
+    if settings.telegram_aviation_source_watch_enabled:
+        _add_aviation_source_watch_job(scheduler, application, service, settings)
     if settings.telegram_hourly_forecast_enabled and mode in {"hourly_max", "both"}:
         _add_hourly_forecast_job(scheduler, application, service, settings)
     if mode in {"legacy", "legacy_reports", "both"}:
@@ -112,6 +114,26 @@ def _add_metar_alert_job(
         id="metar_sensor_alerts",
         replace_existing=True,
         next_run_time=datetime.now(ZoneInfo(settings.report_timezone)),
+        misfire_grace_time=120,
+        coalesce=True,
+        max_instances=1,
+    )
+
+
+def _add_aviation_source_watch_job(
+    scheduler: AsyncIOScheduler,
+    application: Application,
+    service: ForecastService,
+    settings: Settings,
+) -> None:
+    scheduler.add_job(
+        _send_aviation_source_alerts,
+        trigger="interval",
+        seconds=settings.telegram_aviation_source_watch_interval_seconds,
+        args=[application, service],
+        id="aviation_source_watch",
+        replace_existing=True,
+        next_run_time=datetime.now(ZoneInfo(settings.report_timezone)) + timedelta(seconds=10),
         misfire_grace_time=120,
         coalesce=True,
         max_instances=1,
@@ -248,6 +270,36 @@ async def _send_metar_alerts(application: Application, service: ForecastService)
                 "station": metar.station,
                 "source": metar.source,
                 "raw": metar.raw_text,
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+
+async def _send_aviation_source_alerts(application: Application, service: ForecastService) -> None:
+    chat_id = service.settings.telegram_aviation_source_watch_target_chat_id
+    if not chat_id:
+        logger.warning("telegram aviation source watch chat id is not configured")
+        return
+    now = datetime.now(timezone.utc)
+    for snapshot in await service.fetch_aviation_source_snapshots():
+        key = f"telegram:aviation-source:{snapshot.station}:{snapshot.source}:{snapshot.kind}:{snapshot.fingerprint}"
+        if service.repository.telegram_delivery_exists(key):
+            logger.info("%s %s source alert already sent for %s", snapshot.station, snapshot.source, snapshot.fingerprint)
+            continue
+        text = await service.render_aviation_source_alert(snapshot)
+        await _send_long(application, chat_id, text)
+        service.repository.save_telegram_delivery(
+            key=key,
+            chat_id=str(chat_id),
+            kind="aviation_source_alert",
+            target_date=now.date(),
+            scheduled_for=now,
+            payload={
+                "station": snapshot.station,
+                "source": snapshot.source,
+                "kind": snapshot.kind,
+                "fingerprint": snapshot.fingerprint,
+                "source_url": snapshot.source_url,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
             },
         )

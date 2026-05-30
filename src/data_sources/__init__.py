@@ -1,5 +1,6 @@
 from .schemas import (
     ActualResult,
+    AviationSourceSnapshot,
     ForecastAnalysis,
     MarketSnapshot,
     METARNormalized,
@@ -11,6 +12,7 @@ from .schemas import (
 
 __all__ = [
     "ActualResult",
+    "AviationSourceSnapshot",
     "ForecastAnalysis",
     "MarketSnapshot",
     "METARNormalized",

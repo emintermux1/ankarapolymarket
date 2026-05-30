@@ -6,6 +6,7 @@ import pytest
 
 from src.config import Settings
 from src.data_sources.base import SourceError
+from src.data_sources.aviation_watch import AviationWatchAdapter, _noaa_snapshot
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
@@ -45,6 +46,38 @@ async def test_aviationweather_metar_accepts_ltfm_station(monkeypatch) -> None:
     assert metar.station == "LTFM"
     assert metar.temperature_c == 22.0
     assert metar.wind_gust_kt == 22.0
+
+
+def test_noaa_raw_metar_snapshot_parses_time_and_fingerprint() -> None:
+    snapshot = _noaa_snapshot(
+        "LTAC",
+        "https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTAC.TXT",
+        "2026/05/30 09:20\nLTAC 300920Z VRB06KT 9999 SCT040 15/01 Q1018 NOSIG\n",
+    )
+
+    assert snapshot.source == "NOAA"
+    assert snapshot.kind == "raw_metar_fast_fallback"
+    assert snapshot.observed_at == datetime(2026, 5, 30, 9, 20, tzinfo=timezone.utc)
+    assert snapshot.summary_lines == ["LTAC 300920Z VRB06KT 9999 SCT040 15/01 Q1018 NOSIG"]
+    assert len(snapshot.fingerprint) == 16
+
+
+@pytest.mark.asyncio
+async def test_aviapages_uses_bearer_header_without_committing_token(monkeypatch) -> None:
+    adapter = AviationWatchAdapter(Settings(TELEGRAM_ADMIN_IDS="", AVIAPAGES_API_TOKEN="test-token"))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert url == "https://aviapages.com/api/v1/airports/LTAC/"
+        assert kwargs["headers"] == {"Authorization": "Bearer test-token"}
+        return {"icao": "LTAC", "name": "Ankara Esenboğa", "notams": [{"text": "RWY test NOTAM"}]}
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    snapshot = await adapter.get_aviapages_airport("ltac")
+
+    assert snapshot.source == "Aviapages"
+    assert "Ankara Esenboğa" in snapshot.title
+    assert any("RWY test NOTAM" in line for line in snapshot.summary_lines)
 
 
 @pytest.mark.asyncio
