@@ -253,16 +253,20 @@ def test_aviation_source_digest_marks_new_items_and_keeps_links_compact() -> Non
     )
 
     assert text.startswith("🛰 HAVACILIK KAYNAK ÖZETİ")
-    assert "Kaynak: 2 kayıt · yeni: 1" in text
-    assert "• [yeni] Aviapages: Esenboga | icao: LTAC | iata: ESB" in text
-    assert "• [aynı] NOAA: LTFM NOAA raw METAR | LTFM 300920Z" in text
-    assert text.count("Link: ") == 2
+    assert "Kaynak: 2 kontrol · yeni: 1" in text
+    assert "LTAC yeni" in text
+    assert "• Aviapages: Esenboga | icao: LTAC | iata: ESB" in text
+    assert "LTFM NOAA raw METAR" not in text
+    assert "Aynı kalan: 1 kaynak · detay tekrarı yapılmadı." in text
+    assert text.count("Link: ") == 1
 
     unchanged_text = renderer.aviation_source_digest(snapshots, set())
 
-    assert "Kaynak: 2 kayıt · yeni: 0" in unchanged_text
-    assert "• [aynı] Aviapages: Esenboga | icao: LTAC | iata: ESB" in unchanged_text
-    assert "• [yeni]" not in unchanged_text
+    assert "Kaynak: 2 kontrol · yeni: 0" in unchanged_text
+    assert "Durum: yeni değişiklik yok · detay tekrarı yok · istasyonlar: LTAC, LTFM" in unchanged_text
+    assert "LTFM METAR: LTFM 300920Z 23018KT CAVOK 22/09 Q1016 NOSIG · veri 12:20" in unchanged_text
+    assert "Link: " not in unchanged_text
+    assert "[aynı]" not in unchanged_text
 
 
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
