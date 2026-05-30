@@ -152,7 +152,7 @@ class Settings(BaseSettings):
         ),
     )
     telegram_metar_alert_station_ids: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["LTAC", "LTFM"],
+        default_factory=lambda: ["LTAC", "LTAD", "LTAB", "LTFM", "LTBA", "LTFJ", "LTBU"],
         validation_alias=AliasChoices(
             "ANKARA_TELEGRAM_METAR_ALERT_STATION_IDS",
             "LTAC_TELEGRAM_METAR_ALERT_STATION_IDS",
@@ -175,6 +175,24 @@ class Settings(BaseSettings):
             "ANKARA_TELEGRAM_METAR_ALERT_MAX_AGE_MINUTES",
             "LTAC_TELEGRAM_METAR_ALERT_MAX_AGE_MINUTES",
             "TELEGRAM_METAR_ALERT_MAX_AGE_MINUTES",
+        ),
+    )
+    telegram_nearby_sensor_points: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "Istanbul Airport / Arnavutköy|istanbul|41.2608|28.7419",
+            "Arnavutköy merkez|istanbul|41.1842|28.7407",
+            "Çatalca batı hattı|istanbul|41.1432|28.4615",
+            "Başakşehir-Kayaşehir|istanbul|41.1065|28.8068",
+            "Sabiha Gökçen / Pendik|istanbul|40.8986|29.3092",
+            "Esenboğa / LTAC|ankara|40.1281|32.9951",
+            "Çubuk merkez|ankara|40.2386|33.0322",
+            "Akyurt|ankara|40.1354|33.0861",
+            "Pursaklar|ankara|40.0387|32.8956",
+        ],
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_NEARBY_SENSOR_POINTS",
+            "LTAC_TELEGRAM_NEARBY_SENSOR_POINTS",
+            "TELEGRAM_NEARBY_SENSOR_POINTS",
         ),
     )
 
@@ -284,6 +302,7 @@ class Settings(BaseSettings):
         "telegram_admin_ids",
         "telegram_allowed_chat_ids",
         "telegram_metar_alert_station_ids",
+        "telegram_nearby_sensor_points",
         "polymarket_target_location_terms",
         "openmeteo_models",
         "openmeteo_ensemble_models",
@@ -352,6 +371,27 @@ class Settings(BaseSettings):
                 seen.add(key)
                 stations.append(key)
         return stations
+
+    @property
+    def telegram_nearby_sensor_point_defs(self) -> list[dict[str, str | float]]:
+        points: list[dict[str, str | float]] = []
+        for item in self.telegram_nearby_sensor_points:
+            parts = [part.strip() for part in str(item).split("|")]
+            if len(parts) != 4:
+                continue
+            name, region, latitude, longitude = parts
+            try:
+                points.append(
+                    {
+                        "name": name,
+                        "region": region.lower(),
+                        "latitude": float(latitude),
+                        "longitude": float(longitude),
+                    }
+                )
+            except ValueError:
+                continue
+        return points
 
     @property
     def telegram_channel_mode_normalized(self) -> str:

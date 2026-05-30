@@ -15,6 +15,7 @@ from src.data_sources.schemas import (
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
+    NearbySensorSnapshot,
     SourceHealth,
     TAFNormalized,
 )
@@ -36,6 +37,7 @@ class TelegramReportRenderer:
         market: MarketSnapshot | None,
         forum: ForumAnalysis | None = None,
         recent_observations: list[dict[str, Any]] | None = None,
+        nearby_sensors: list[NearbySensorSnapshot] | None = None,
         report_label: str | None = None,
         previous_analysis: ForecastAnalysis | None = None,
         previous_model_tmax_c: Mapping[str, float | None] | None = None,
@@ -63,6 +65,9 @@ class TelegramReportRenderer:
                 "",
                 "Canlı gözlem:",
                 *self._metar_lines(metar, include_raw=False),
+                "",
+                "Yakın canlı sensörler:",
+                *self._nearby_sensor_lines(nearby_sensors or [], metar=metar, limit=4),
                 "",
                 "🚨 YUVARLAMA ALARMI:",
                 *self._rounding_alarm_lines(analysis, metar, taf),
@@ -112,6 +117,7 @@ class TelegramReportRenderer:
         model_bundle: ModelBundle | None,
         market: MarketSnapshot | None,
         recent_observations: list[dict[str, Any]] | None = None,
+        nearby_sensors: list[NearbySensorSnapshot] | None = None,
         previous_analysis: ForecastAnalysis | None = None,
     ) -> str:
         report_time = analysis.generated_at.astimezone(self.tz)
@@ -130,6 +136,7 @@ class TelegramReportRenderer:
                 f"Gün içi ölçülen max: {_fmt_c(observed_peak)}",
                 _remaining_warming_line(analysis, observed_peak),
                 f"Son trend: {trend}",
+                *_compact_nearby_sensor_lines(nearby_sensors or [], metar),
                 "",
                 f"Güven: {analysis.confidence_score}/100 ({_confidence_label(analysis.confidence_score)})",
                 f"Sınır riski: {_boundary_risk(analysis)}",
@@ -191,7 +198,7 @@ class TelegramReportRenderer:
             return "LTAC METAR verisi yok."
         return "\n".join([f"{metar.station} SON GÖZLEM", *self._metar_lines(metar)])
 
-    def metar_alert(self, metar: METARNormalized) -> str:
+    def metar_alert(self, metar: METARNormalized, nearby_sensors: list[NearbySensorSnapshot] | None = None) -> str:
         observed_local = metar.observation_time.astimezone(self.tz)
         fetched_local = metar.fetch_timestamp.astimezone(self.tz)
         return "\n".join(
@@ -199,6 +206,8 @@ class TelegramReportRenderer:
                 f"🚨 {metar.station} YENİ METAR/SENSÖR",
                 f"Zaman: {observed_local:%Y-%m-%d %H:%M} {self.tz.key} · {metar.observation_time:%H:%M} UTC",
                 f"Kaynak: {metar.source} · çekim {fetched_local:%H:%M:%S}",
+                "Kaynak linkleri:",
+                *_metar_source_lines(metar),
                 "",
                 f"Sıcaklık: {metar.temperature_c:.1f}°C · çiy {metar.dew_point_c:.1f}°C · nem %{metar.relative_humidity if metar.relative_humidity is not None else 'veri yok'}",
                 f"Rüzgâr: {_metar_wind_text(metar)}",
@@ -208,6 +217,9 @@ class TelegramReportRenderer:
                 f"Hava olayı: {_metar_weather_text(metar)}",
                 "",
                 *_metar_extra_sensor_lines(metar),
+                "",
+                "Yakın canlı sensörler:",
+                *self._nearby_sensor_lines(nearby_sensors or [], metar=metar, limit=5),
                 "",
                 f"Raw: {metar.raw_text or 'veri yok'}",
             ]
@@ -386,6 +398,39 @@ class TelegramReportRenderer:
         ]
         if include_raw:
             return [_bullet(f"Son METAR: {metar.raw_text}"), *lines]
+        return lines
+
+    def _nearby_sensor_lines(
+        self,
+        sensors: list[NearbySensorSnapshot],
+        *,
+        metar: METARNormalized | None = None,
+        limit: int = 5,
+    ) -> list[str]:
+        if not sensors:
+            return [_bullet("Yakın sensör: veri yok")]
+        lines: list[str] = []
+        for sensor in sensors[:limit]:
+            observed = sensor.observation_time.astimezone(self.tz) if sensor.observation_time else None
+            observed_text = f"{observed:%H:%M}" if observed else "zaman yok"
+            delta = (
+                f" · METAR farkı {_fmt_signed_c(sensor.temperature_c - metar.temperature_c)}"
+                if metar is not None and sensor.temperature_c is not None
+                else ""
+            )
+            lines.append(
+                _bullet(
+                    f"{sensor.name}: {_fmt_c(sensor.temperature_c)}"
+                    f"{delta} · hissedilen {_fmt_c(sensor.apparent_temperature_c)}"
+                    f" · nem {_fmt_pct_from_whole(sensor.relative_humidity)}"
+                    f" · rüzgâr {_format_wind(sensor.wind_direction_deg, sensor.wind_speed_kt)}"
+                    f" · yağış {_fmt_mm(sensor.precipitation_mm)}"
+                    f" · {observed_text} · {sensor.source}"
+                )
+            )
+            lines.append(_bullet(f"Kaynak: {sensor.source_url}"))
+        if len(sensors) > limit:
+            lines.append(_bullet(f"Ek yakın nokta: {len(sensors) - limit} adet"))
         return lines
 
     def _model_lines(
@@ -952,6 +997,10 @@ def _fmt_num(value: float | int | None) -> str:
     return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
+def _fmt_mm(value: float | int | None) -> str:
+    return f"{float(value):.1f} mm" if value is not None else "veri yok"
+
+
 def _fmt_m(value: object | None) -> str:
     if value is None:
         return "veri yok"
@@ -1066,6 +1115,19 @@ def _remaining_warming_line(analysis: ForecastAnalysis, observed_peak_c: float |
         return "Kalan ısınma payı: veri yok"
     remaining = max(0.0, analysis.final_tmax_c - observed_peak_c)
     return f"Kalan ısınma payı: {remaining:.1f}°C"
+
+
+def _compact_nearby_sensor_lines(sensors: list[NearbySensorSnapshot], metar: METARNormalized | None) -> list[str]:
+    if not sensors:
+        return ["Yakın sensörler: veri yok"]
+    parts = []
+    for sensor in sensors[:3]:
+        delta = ""
+        if metar is not None and sensor.temperature_c is not None:
+            delta = f" ({_fmt_signed_c(sensor.temperature_c - metar.temperature_c)})"
+        parts.append(f"{sensor.name} {_fmt_c(sensor.temperature_c)}{delta}")
+    suffix = f" +{len(sensors) - 3}" if len(sensors) > 3 else ""
+    return [f"Yakın sensörler: {' · '.join(parts)}{suffix}"]
 
 
 def _rounding_distance_line(final_tmax_c: float | None) -> str:
@@ -1262,6 +1324,14 @@ def _metar_wind_text(metar: METARNormalized) -> str:
     direction = f"{metar.wind_direction_deg:03d}°" if metar.wind_direction_deg is not None else "VRB"
     gust = f" G{metar.wind_gust_kt:.0f}" if metar.wind_gust_kt is not None else ""
     return f"{direction}/{metar.wind_speed_kt:.0f}{gust} KT"
+
+
+def _metar_source_lines(metar: METARNormalized) -> list[str]:
+    station = metar.station.strip().upper()
+    return [
+        _bullet(f"AviationWeather: https://aviationweather.gov/api/data/metar?ids={station}&format=json"),
+        _bullet(f"IEM ASOS: https://mesonet.agron.iastate.edu/sites/site.php?station={station}&network=TR__ASOS"),
+    ]
 
 
 def _format_visibility_m(value: int | None) -> str:
