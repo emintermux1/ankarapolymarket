@@ -168,7 +168,7 @@ class AviationWatchAdapter(HttpSource):
     async def get_aviapages_airport(self, station: str) -> AviationSourceSnapshot:
         station_id = station.strip().upper()
         url = f"{self.aviapages_base_url}/airports/{station_id}/"
-        headers = {"Authorization": f"Bearer {self.settings.aviapages_api_token}"}
+        headers = {"Authorization": f"Token {self.settings.aviapages_api_token}"}
         payload = await self._request_json(url, headers=headers)
         if not isinstance(payload, dict):
             raise SourceError(self.source_name, "Aviapages payload is not an object")

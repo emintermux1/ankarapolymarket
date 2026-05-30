@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from src.bot import scheduler as scheduler_module
 from src.bot.commands import _reply_long
 from src.bot.scheduler import _send_aviation_source_alerts, _send_long, _send_metar_alerts
 from src.data_sources.schemas import AviationSourceSnapshot, METARNormalized
@@ -107,6 +108,49 @@ async def test_aviation_source_watch_sends_each_fingerprint_once() -> None:
     assert bot.send_message.call_args.kwargs["text"] == "LTAC NOAA alert"
     assert repository.saved[0]["kind"] == "aviation_source_alert"
     assert "abc123" in repository.saved[0]["key"]
+
+
+@pytest.mark.asyncio
+async def test_aviation_source_watch_continues_after_send_timeout(monkeypatch) -> None:
+    now = datetime.now(timezone.utc)
+    snapshots = [
+        AviationSourceSnapshot(
+            source="NOAA",
+            station="LTAC",
+            kind="raw_metar_fast_fallback",
+            title="LTAC NOAA raw METAR",
+            source_url="https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTAC.TXT",
+            fetch_timestamp=now,
+            summary_lines=["LTAC first"],
+            fingerprint="first",
+        ),
+        AviationSourceSnapshot(
+            source="IFATC",
+            station="LTAC",
+            kind="airport_runway_frequency_metadata",
+            title="LTAC IFATC airport info",
+            source_url="https://www.ifatc.org/airports?apt=LTAC",
+            fetch_timestamp=now,
+            summary_lines=["LTAC second"],
+            fingerprint="second",
+        ),
+    ]
+    repository = _FakeRepository()
+    service = SimpleNamespace(
+        settings=SimpleNamespace(telegram_aviation_source_watch_target_chat_id="@ankarapm"),
+        repository=repository,
+        fetch_aviation_source_snapshots=AsyncMock(return_value=snapshots),
+        render_aviation_source_alert=AsyncMock(side_effect=["first alert", "second alert"]),
+    )
+    bot = SimpleNamespace(send_message=AsyncMock(side_effect=[TimeoutError("slow"), None]))
+    application = SimpleNamespace(bot=bot)
+    monkeypatch.setattr(scheduler_module.asyncio, "sleep", AsyncMock())
+
+    await _send_aviation_source_alerts(application, service)
+
+    assert bot.send_message.call_count == 2
+    assert len(repository.saved) == 1
+    assert "second" in repository.saved[0]["key"]
 
 
 class _FakeRepository:

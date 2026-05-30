@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -287,7 +288,17 @@ async def _send_aviation_source_alerts(application: Application, service: Foreca
             logger.info("%s %s source alert already sent for %s", snapshot.station, snapshot.source, snapshot.fingerprint)
             continue
         text = await service.render_aviation_source_alert(snapshot)
-        await _send_long(application, chat_id, text)
+        try:
+            await _send_long(application, chat_id, text)
+        except Exception as exc:
+            logger.warning(
+                "failed to send %s %s source alert %s: %s",
+                snapshot.station,
+                snapshot.source,
+                snapshot.fingerprint,
+                exc,
+            )
+            continue
         service.repository.save_telegram_delivery(
             key=key,
             chat_id=str(chat_id),
@@ -303,6 +314,7 @@ async def _send_aviation_source_alerts(application: Application, service: Foreca
                 "sent_at": datetime.now(timezone.utc).isoformat(),
             },
         )
+        await asyncio.sleep(1)
 
 
 async def _send_long(application: Application, chat_id: str, text: str) -> None:
