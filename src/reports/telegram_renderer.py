@@ -229,7 +229,8 @@ class TelegramReportRenderer:
     def aviation_source_digest(self, snapshots: list[AviationSourceSnapshot], new_snapshot_keys: set[str] | None = None) -> str:
         if not snapshots:
             return "Havacılık kaynak özeti: yeni veri yok."
-        new_snapshot_keys = new_snapshot_keys or {_aviation_source_snapshot_key(snapshot) for snapshot in snapshots}
+        if new_snapshot_keys is None:
+            new_snapshot_keys = {_aviation_source_snapshot_key(snapshot) for snapshot in snapshots}
         fetched_local = max(snapshot.fetch_timestamp for snapshot in snapshots).astimezone(self.tz)
         new_count = sum(1 for snapshot in snapshots if _aviation_source_snapshot_key(snapshot) in new_snapshot_keys)
         lines = [

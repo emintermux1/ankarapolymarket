@@ -291,9 +291,6 @@ async def _send_aviation_source_alerts(application: Application, service: Foreca
             continue
         new_snapshots.append(snapshot)
         new_keys.add(key)
-    if not new_snapshots:
-        logger.info("aviation source watch found no new fingerprints")
-        return
     text = await service.render_aviation_source_digest(snapshots, new_keys)
     try:
         await _send_long(application, chat_id, text)

@@ -77,7 +77,7 @@ async def test_metar_alert_sends_new_station_observation_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_aviation_source_watch_sends_single_digest_for_new_fingerprints() -> None:
+async def test_aviation_source_watch_sends_digest_every_run_and_marks_only_new_fingerprints() -> None:
     now = datetime.now(timezone.utc)
     snapshots = [
         AviationSourceSnapshot(
@@ -115,15 +115,16 @@ async def test_aviation_source_watch_sends_single_digest_for_new_fingerprints() 
     await _send_aviation_source_alerts(application, service)
     await _send_aviation_source_alerts(application, service)
 
-    assert bot.send_message.call_count == 1
+    assert bot.send_message.call_count == 2
     assert bot.send_message.call_args.kwargs["text"] == "single digest"
-    assert service.render_aviation_source_digest.call_args.args == (
+    assert service.render_aviation_source_digest.call_args_list[0].args == (
         snapshots,
         {
             "telegram:aviation-source:LTAC:NOAA:raw_metar_fast_fallback:abc123",
             "telegram:aviation-source:LTAC:IFATC:airport_runway_frequency_metadata:def456",
         },
     )
+    assert service.render_aviation_source_digest.call_args_list[1].args == (snapshots, set())
     assert [item["kind"] for item in repository.saved] == ["aviation_source_digest", "aviation_source_digest"]
     assert {"abc123", "def456"} == {item["payload"]["fingerprint"] for item in repository.saved}
 
