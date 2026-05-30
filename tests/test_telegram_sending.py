@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.bot.commands import _reply_long
-from src.bot.scheduler import _send_long, _send_metar_alerts
-from src.data_sources.schemas import METARNormalized
+from src.bot.scheduler import _send_aviation_source_alerts, _send_long, _send_metar_alerts
+from src.data_sources.schemas import AviationSourceSnapshot, METARNormalized
 
 
 @pytest.mark.asyncio
@@ -74,6 +74,39 @@ async def test_metar_alert_sends_new_station_observation_once() -> None:
     assert bot.send_message.call_args.kwargs["text"] == "LTFM alert"
     assert repository.saved[0]["kind"] == "metar_alert"
     assert "LTFM" in repository.saved[0]["key"]
+
+
+@pytest.mark.asyncio
+async def test_aviation_source_watch_sends_each_fingerprint_once() -> None:
+    now = datetime.now(timezone.utc)
+    snapshot = AviationSourceSnapshot(
+        source="NOAA",
+        station="LTAC",
+        kind="raw_metar_fast_fallback",
+        title="LTAC NOAA raw METAR",
+        source_url="https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTAC.TXT",
+        fetch_timestamp=now,
+        observed_at=now,
+        summary_lines=["LTAC 300920Z VRB06KT 9999 SCT040 15/01 Q1018 NOSIG"],
+        fingerprint="abc123",
+    )
+    repository = _FakeRepository()
+    service = SimpleNamespace(
+        settings=SimpleNamespace(telegram_aviation_source_watch_target_chat_id="@ankarapm"),
+        repository=repository,
+        fetch_aviation_source_snapshots=AsyncMock(return_value=[snapshot]),
+        render_aviation_source_alert=AsyncMock(return_value="LTAC NOAA alert"),
+    )
+    bot = SimpleNamespace(send_message=AsyncMock())
+    application = SimpleNamespace(bot=bot)
+
+    await _send_aviation_source_alerts(application, service)
+    await _send_aviation_source_alerts(application, service)
+
+    assert bot.send_message.call_count == 1
+    assert bot.send_message.call_args.kwargs["text"] == "LTAC NOAA alert"
+    assert repository.saved[0]["kind"] == "aviation_source_alert"
+    assert "abc123" in repository.saved[0]["key"]
 
 
 class _FakeRepository:

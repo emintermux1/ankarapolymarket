@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from src.config import Settings
 from src.data_sources.schemas import (
     ActualResult,
+    AviationSourceSnapshot,
     ForecastAnalysis,
     ForumAnalysis,
     MarketSnapshot,
@@ -224,6 +225,26 @@ class TelegramReportRenderer:
                 f"Raw: {metar.raw_text or 'veri yok'}",
             ]
         )
+
+    def aviation_source_alert(self, snapshot: AviationSourceSnapshot) -> str:
+        fetched_local = snapshot.fetch_timestamp.astimezone(self.tz)
+        observed = snapshot.observed_at.astimezone(self.tz) if snapshot.observed_at else None
+        lines = [
+            f"🛰 {snapshot.station} KAYNAK GÜNCELLEMESİ",
+            f"Kaynak: {snapshot.source} · {snapshot.kind}",
+            f"Çekim: {fetched_local:%Y-%m-%d %H:%M:%S} {self.tz.key}",
+        ]
+        if observed:
+            lines.append(f"Veri zamanı: {observed:%Y-%m-%d %H:%M} {self.tz.key} · {snapshot.observed_at:%H:%M} UTC")
+        lines.extend(
+            [
+                f"Link: {snapshot.source_url}",
+                "",
+                snapshot.title,
+                *(_bullet(line) for line in snapshot.summary_lines[:8]),
+            ]
+        )
+        return "\n".join(lines)
 
     def taf_report(self, taf: TAFNormalized | None) -> str:
         if taf is None:

@@ -17,7 +17,19 @@ def main() -> None:
         "command",
         nargs="?",
         default="bot",
-        choices=["bot", "web", "report", "hourly", "metars", "signals", "aviation", "forum", "sources", "result"],
+        choices=[
+            "bot",
+            "web",
+            "report",
+            "hourly",
+            "metars",
+            "aviation-sources",
+            "signals",
+            "aviation",
+            "forum",
+            "sources",
+            "result",
+        ],
     )
     parser.add_argument("--date", dest="target_date", help="Target date as YYYY-MM-DD")
     parser.add_argument("--host", default="0.0.0.0", help="Web server host")
@@ -43,6 +55,11 @@ def main() -> None:
         metars = asyncio.run(service.fetch_metar_alert_observations())
         reports = [asyncio.run(service.render_metar_alert(metar)) for metar in metars]
         print("\n\n".join(reports) if reports else "LTAC/LTFM METAR verisi yok.")
+        return
+    if args.command == "aviation-sources":
+        snapshots = asyncio.run(service.fetch_aviation_source_snapshots())
+        reports = [asyncio.run(service.render_aviation_source_alert(snapshot)) for snapshot in snapshots]
+        print("\n\n".join(reports) if reports else "Havacılık kaynak verisi yok.")
         return
     if args.command == "aviation":
         print(asyncio.run(service.render_aviation(target_date=target)))

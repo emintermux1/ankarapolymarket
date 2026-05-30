@@ -82,6 +82,20 @@ def test_nearby_sensor_points_parse_istanbul_and_ankara_defaults() -> None:
     assert all(isinstance(point["latitude"], float) and isinstance(point["longitude"], float) for point in points)
 
 
+def test_aviation_source_watch_defaults_and_aliases() -> None:
+    settings = Settings(
+        TELEGRAM_ADMIN_IDS="",
+        ANKARA_TELEGRAM_CHANNEL_ID="@ankarapm",
+        ANKARA_TELEGRAM_AVIATION_SOURCE_WATCH_CHANNEL_ID="@sources",
+        ANKARA_AVIATION_SOURCE_WATCH_STATION_IDS="ltac,ltfm,LTAC",
+    )
+
+    assert settings.telegram_aviation_source_watch_enabled is True
+    assert settings.telegram_aviation_source_watch_target_chat_id == "@sources"
+    assert settings.aviation_source_watch_station_keys == ["LTAC", "LTFM"]
+    assert "@sources" in settings.telegram_allowed_chat_keys
+
+
 def test_telegram_channel_mode_aliases_are_normalized() -> None:
     assert (
         Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_CHANNEL_MODE="hourly").telegram_channel_mode_normalized
@@ -114,7 +128,7 @@ async def test_scheduler_starts_inside_running_loop(tmp_path) -> None:
     scheduler = application.bot_data["scheduler"]
 
     job_ids = {job.id for job in scheduler.get_jobs()}
-    assert job_ids == {"ltac_hourly_max_forecast", "metar_sensor_alerts"}
+    assert job_ids == {"ltac_hourly_max_forecast", "metar_sensor_alerts", "aviation_source_watch"}
 
     await _start_scheduler(application)
     assert scheduler.running
@@ -136,4 +150,10 @@ def test_scheduler_legacy_mode_disables_hourly_job(tmp_path) -> None:
 
     job_ids = {job.id for job in application.bot_data["scheduler"].get_jobs()}
     assert "ltac_hourly_max_forecast" not in job_ids
-    assert job_ids == {"ltac_alert_watch", "ltac_daily_forecast", "ltac_market_resolve", "metar_sensor_alerts"}
+    assert job_ids == {
+        "aviation_source_watch",
+        "ltac_alert_watch",
+        "ltac_daily_forecast",
+        "ltac_market_resolve",
+        "metar_sensor_alerts",
+    }

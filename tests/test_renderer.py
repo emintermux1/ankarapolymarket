@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from src.config import Settings
 from src.data_sources.schemas import (
     ActualResult,
+    AviationSourceSnapshot,
     ForecastAdjustment,
     ForecastAnalysis,
     ForumAnalysis,
@@ -192,6 +193,30 @@ def test_metar_alert_includes_nearby_public_sensor_links_and_deltas() -> None:
     assert "Yakın canlı sensörler:" in text
     assert "Çubuk merkez: 25.2°C · METAR farkı +1.2°C" in text
     assert "Kaynak: https://api.open-meteo.com/v1/forecast?latitude=40.2386" in text
+
+
+def test_aviation_source_alert_renders_link_and_summary() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 30, 9, 20, tzinfo=timezone.utc)
+    snapshot = AviationSourceSnapshot(
+        source="NOAA",
+        station="LTFM",
+        kind="raw_metar_fast_fallback",
+        title="LTFM NOAA raw METAR",
+        source_url="https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTFM.TXT",
+        fetch_timestamp=now,
+        observed_at=now,
+        summary_lines=["LTFM 300920Z 23018KT CAVOK 22/09 Q1016 NOSIG"],
+        fingerprint="abc123",
+    )
+
+    text = renderer.aviation_source_alert(snapshot)
+
+    assert "LTFM KAYNAK GÜNCELLEMESİ" in text
+    assert "Kaynak: NOAA · raw_metar_fast_fallback" in text
+    assert "Link: https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTFM.TXT" in text
+    assert "LTFM 300920Z 23018KT" in text
 
 
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from src.config import Settings
 from src.data_sources.aviationweather import AviationWeatherAdapter
+from src.data_sources.aviation_watch import AviationWatchAdapter
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.havaforum import HavaForumScraper
 from src.data_sources.herbie_optional import unavailable_health as herbie_unavailable_health
@@ -17,6 +18,7 @@ from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.schemas import (
     ActualResult,
+    AviationSourceSnapshot,
     ForecastAnalysis,
     ForumAnalysis,
     MarketSnapshot,
@@ -69,6 +71,7 @@ class ForecastService:
         self.engine = LTACForecastEngine(settings)
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
+        self.aviation_watch = AviationWatchAdapter(settings)
 
     def default_target_date(self) -> date:
         return datetime.now(ZoneInfo(self.settings.report_timezone)).date()
@@ -160,6 +163,12 @@ class ForecastService:
     async def render_metar_alert(self, metar: METARNormalized) -> str:
         nearby_sensors = await self._safe_nearby_sensor_snapshots(_nearby_region_for_station(metar.station))
         return self.renderer.metar_alert(metar, nearby_sensors=nearby_sensors)
+
+    async def fetch_aviation_source_snapshots(self) -> list[AviationSourceSnapshot]:
+        return await self.aviation_watch.fetch_snapshots()
+
+    async def render_aviation_source_alert(self, snapshot: AviationSourceSnapshot) -> str:
+        return self.renderer.aviation_source_alert(snapshot)
 
     async def fetch_metar_alert_observations(self) -> list[METARNormalized]:
         stations = self.settings.telegram_metar_alert_station_keys
@@ -287,6 +296,7 @@ class ForecastService:
             self.iem.health(),
             self.wunderground.health(),
             self.havaforum.health(),
+            self.aviation_watch.health(),
         )
         optional_health = [mgm_unavailable_health(), herbie_unavailable_health()]
         for item in [*health, *optional_health]:

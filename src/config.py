@@ -195,6 +195,39 @@ class Settings(BaseSettings):
             "TELEGRAM_NEARBY_SENSOR_POINTS",
         ),
     )
+    telegram_aviation_source_watch_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_AVIATION_SOURCE_WATCH_ENABLED",
+            "LTAC_TELEGRAM_AVIATION_SOURCE_WATCH_ENABLED",
+            "TELEGRAM_AVIATION_SOURCE_WATCH_ENABLED",
+        ),
+    )
+    telegram_aviation_source_watch_channel_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_AVIATION_SOURCE_WATCH_CHANNEL_ID",
+            "LTAC_TELEGRAM_AVIATION_SOURCE_WATCH_CHANNEL_ID",
+            "TELEGRAM_AVIATION_SOURCE_WATCH_CHANNEL_ID",
+        ),
+    )
+    telegram_aviation_source_watch_interval_seconds: int = Field(
+        default=180,
+        ge=60,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_AVIATION_SOURCE_WATCH_INTERVAL_SECONDS",
+            "LTAC_TELEGRAM_AVIATION_SOURCE_WATCH_INTERVAL_SECONDS",
+            "TELEGRAM_AVIATION_SOURCE_WATCH_INTERVAL_SECONDS",
+        ),
+    )
+    aviation_source_watch_station_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["LTAC", "LTFM"],
+        validation_alias=AliasChoices(
+            "ANKARA_AVIATION_SOURCE_WATCH_STATION_IDS",
+            "LTAC_AVIATION_SOURCE_WATCH_STATION_IDS",
+            "AVIATION_SOURCE_WATCH_STATION_IDS",
+        ),
+    )
 
     database_url: str = Field(default="sqlite:///./data/ltac_weather_bot.db", alias="DATABASE_URL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -273,6 +306,8 @@ class Settings(BaseSettings):
     xweather_client_id: str | None = Field(default=None, alias="XWEATHER_CLIENT_ID")
     xweather_client_secret: str | None = Field(default=None, alias="XWEATHER_CLIENT_SECRET")
     xweather_namespace: str | None = Field(default=None, alias="XWEATHER_NAMESPACE")
+    aviapages_api_token: str | None = Field(default=None, alias="AVIAPAGES_API_TOKEN")
+    aviapages_api_base_url: str = Field(default="https://aviapages.com/api/v1", alias="AVIAPAGES_API_BASE_URL")
     havaforum_thread_url: str = Field(
         default="https://forum.havaforum.com/thread/8893-ankara-%C3%B6zel-raporlar-yorumlar/",
         alias="HAVAFORUM_THREAD_URL",
@@ -303,6 +338,7 @@ class Settings(BaseSettings):
         "telegram_allowed_chat_ids",
         "telegram_metar_alert_station_ids",
         "telegram_nearby_sensor_points",
+        "aviation_source_watch_station_ids",
         "polymarket_target_location_terms",
         "openmeteo_models",
         "openmeteo_ensemble_models",
@@ -350,6 +386,8 @@ class Settings(BaseSettings):
             keys.add(str(self.telegram_hourly_forecast_channel_id).strip().lower())
         if self.telegram_metar_alert_channel_id:
             keys.add(str(self.telegram_metar_alert_channel_id).strip().lower())
+        if self.telegram_aviation_source_watch_channel_id:
+            keys.add(str(self.telegram_aviation_source_watch_channel_id).strip().lower())
         keys.update(str(item) for item in self.telegram_admin_ids)
         return keys
 
@@ -362,10 +400,25 @@ class Settings(BaseSettings):
         return self.telegram_metar_alert_channel_id or self.telegram_channel_id
 
     @property
+    def telegram_aviation_source_watch_target_chat_id(self) -> str | None:
+        return self.telegram_aviation_source_watch_channel_id or self.telegram_metar_alert_target_chat_id
+
+    @property
     def telegram_metar_alert_station_keys(self) -> list[str]:
         seen: set[str] = set()
         stations: list[str] = []
         for station in self.telegram_metar_alert_station_ids:
+            key = str(station).strip().upper()
+            if key and key not in seen:
+                seen.add(key)
+                stations.append(key)
+        return stations
+
+    @property
+    def aviation_source_watch_station_keys(self) -> list[str]:
+        seen: set[str] = set()
+        stations: list[str] = []
+        for station in self.aviation_source_watch_station_ids:
             key = str(station).strip().upper()
             if key and key not in seen:
                 seen.add(key)

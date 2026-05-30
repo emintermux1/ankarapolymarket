@@ -82,6 +82,20 @@ class NearbySensorSnapshot(BaseModel):
     raw_json: dict[str, Any] = Field(default_factory=dict)
 
 
+class AviationSourceSnapshot(BaseModel):
+    source: str
+    station: str
+    kind: str
+    title: str
+    source_url: str
+    fetch_timestamp: datetime
+    observed_at: datetime | None = None
+    summary_lines: list[str] = Field(default_factory=list)
+    fingerprint: str
+    raw_text: str | None = None
+    raw_json: dict[str, Any] = Field(default_factory=dict)
+
+
 class TAFForecastPeriod(BaseModel):
     time_from: datetime
     time_to: datetime
