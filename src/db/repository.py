@@ -43,11 +43,16 @@ class Repository:
     def init_db(self) -> None:
         Base.metadata.create_all(self.engine)
 
-    def save_observation(self, metar: METARNormalized) -> None:
+    def save_observation(self, metar: METARNormalized) -> bool:
         with self.session_factory() as session:
-            exists = session.scalar(select(Observation).where(Observation.observation_time == metar.observation_time))
+            exists = session.scalar(
+                select(Observation).where(
+                    Observation.station == metar.station,
+                    Observation.observation_time == metar.observation_time,
+                )
+            )
             if exists:
-                return
+                return False
             session.add(
                 Observation(
                     fetch_timestamp=metar.fetch_timestamp,
@@ -66,7 +71,12 @@ class Repository:
                     raw_json=metar.raw_json,
                 )
             )
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                return False
+            return True
 
     def save_taf(self, taf: TAFNormalized) -> None:
         with self.session_factory() as session:

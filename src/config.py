@@ -135,6 +135,48 @@ class Settings(BaseSettings):
             "TELEGRAM_HOURLY_FORECAST_MODEL_SPREAD_C",
         ),
     )
+    telegram_metar_alerts_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_METAR_ALERTS_ENABLED",
+            "LTAC_TELEGRAM_METAR_ALERTS_ENABLED",
+            "TELEGRAM_METAR_ALERTS_ENABLED",
+        ),
+    )
+    telegram_metar_alert_channel_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_METAR_ALERT_CHANNEL_ID",
+            "LTAC_TELEGRAM_METAR_ALERT_CHANNEL_ID",
+            "TELEGRAM_METAR_ALERT_CHANNEL_ID",
+        ),
+    )
+    telegram_metar_alert_station_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["LTAC", "LTFM"],
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_METAR_ALERT_STATION_IDS",
+            "LTAC_TELEGRAM_METAR_ALERT_STATION_IDS",
+            "TELEGRAM_METAR_ALERT_STATION_IDS",
+        ),
+    )
+    telegram_metar_alert_interval_seconds: int = Field(
+        default=60,
+        ge=30,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_METAR_ALERT_INTERVAL_SECONDS",
+            "LTAC_TELEGRAM_METAR_ALERT_INTERVAL_SECONDS",
+            "TELEGRAM_METAR_ALERT_INTERVAL_SECONDS",
+        ),
+    )
+    telegram_metar_alert_max_age_minutes: int = Field(
+        default=180,
+        ge=1,
+        validation_alias=AliasChoices(
+            "ANKARA_TELEGRAM_METAR_ALERT_MAX_AGE_MINUTES",
+            "LTAC_TELEGRAM_METAR_ALERT_MAX_AGE_MINUTES",
+            "TELEGRAM_METAR_ALERT_MAX_AGE_MINUTES",
+        ),
+    )
 
     database_url: str = Field(default="sqlite:///./data/ltac_weather_bot.db", alias="DATABASE_URL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -231,6 +273,7 @@ class Settings(BaseSettings):
     @field_validator(
         "telegram_admin_ids",
         "telegram_allowed_chat_ids",
+        "telegram_metar_alert_station_ids",
         "polymarket_target_location_terms",
         "openmeteo_models",
         "openmeteo_ensemble_models",
@@ -276,12 +319,29 @@ class Settings(BaseSettings):
             keys.add(str(self.telegram_channel_id).strip().lower())
         if self.telegram_hourly_forecast_channel_id:
             keys.add(str(self.telegram_hourly_forecast_channel_id).strip().lower())
+        if self.telegram_metar_alert_channel_id:
+            keys.add(str(self.telegram_metar_alert_channel_id).strip().lower())
         keys.update(str(item) for item in self.telegram_admin_ids)
         return keys
 
     @property
     def telegram_hourly_forecast_target_chat_id(self) -> str | None:
         return self.telegram_hourly_forecast_channel_id or self.telegram_channel_id
+
+    @property
+    def telegram_metar_alert_target_chat_id(self) -> str | None:
+        return self.telegram_metar_alert_channel_id or self.telegram_channel_id
+
+    @property
+    def telegram_metar_alert_station_keys(self) -> list[str]:
+        seen: set[str] = set()
+        stations: list[str] = []
+        for station in self.telegram_metar_alert_station_ids:
+            key = str(station).strip().upper()
+            if key and key not in seen:
+                seen.add(key)
+                stations.append(key)
+        return stations
 
     @property
     def telegram_channel_mode_normalized(self) -> str:

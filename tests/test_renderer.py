@@ -115,6 +115,39 @@ def test_hourly_max_forecast_is_short_exact_degree_message() -> None:
     assert "Yatırım tavsiyesi değildir" in text
 
 
+def test_metar_alert_includes_ltfm_sensor_fields() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 27, 10, 5, tzinfo=timezone.utc)
+    metar = METARNormalized(
+        source="AviationWeather",
+        station="LTFM",
+        fetch_timestamp=now,
+        observation_time=now,
+        temperature_c=22.0,
+        dew_point_c=13.0,
+        relative_humidity=57,
+        wind_direction_deg=40,
+        wind_speed_kt=12.0,
+        wind_gust_kt=22.0,
+        pressure_hpa=1014.0,
+        visibility_m=9999,
+        cloud_layers=[{"cover": "SCT", "base": 2500}],
+        raw_text="METAR LTFM 271005Z 04012G22KT 9999 SCT025 22/13 Q1014",
+        raw_json={"wxString": "SHRA", "slp": 1014.2, "pcp3hr": 0.4, "metarType": "METAR", "qcField": 4},
+    )
+
+    text = renderer.metar_alert(metar)
+
+    assert "LTFM YENİ METAR/SENSÖR" in text
+    assert "Sıcaklık: 22.0°C" in text
+    assert "Rüzgâr: 040°/12 G22 KT" in text
+    assert "Hava olayı: SHRA" in text
+    assert "Ek sensör: tip=METAR, SLP=1014.2" in text
+    assert "Yağış/kar: 3s=0.4" in text
+    assert "Raw: METAR LTFM" in text
+
+
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)

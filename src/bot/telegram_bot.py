@@ -24,6 +24,7 @@ def build_application(settings: Settings, service: ForecastService) -> Applicati
     application.add_handler(CommandHandler("today", commands.today))
     application.add_handler(CommandHandler("now", commands.now))
     application.add_handler(CommandHandler("metar", commands.metar))
+    application.add_handler(CommandHandler("metars", commands.metars))
     application.add_handler(CommandHandler("taf", commands.taf))
     application.add_handler(CommandHandler("models", commands.models))
     application.add_handler(CommandHandler("signals", commands.signals))

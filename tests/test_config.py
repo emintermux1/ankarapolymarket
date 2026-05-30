@@ -59,6 +59,20 @@ def test_hourly_telegram_channel_mode_defaults() -> None:
     assert "@ankaraalerts" in settings.telegram_allowed_chat_keys
 
 
+def test_metar_alert_defaults_include_ltac_and_ltfm() -> None:
+    settings = Settings(
+        TELEGRAM_ADMIN_IDS="",
+        ANKARA_TELEGRAM_CHANNEL_ID="@ankarapm",
+        ANKARA_TELEGRAM_METAR_ALERT_CHANNEL_ID="@metaralarms",
+        ANKARA_TELEGRAM_METAR_ALERT_STATION_IDS="ltac,ltfm,LTAC",
+    )
+
+    assert settings.telegram_metar_alerts_enabled is True
+    assert settings.telegram_metar_alert_station_keys == ["LTAC", "LTFM"]
+    assert settings.telegram_metar_alert_target_chat_id == "@metaralarms"
+    assert "@metaralarms" in settings.telegram_allowed_chat_keys
+
+
 def test_telegram_channel_mode_aliases_are_normalized() -> None:
     assert (
         Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_CHANNEL_MODE="hourly").telegram_channel_mode_normalized
@@ -91,7 +105,7 @@ async def test_scheduler_starts_inside_running_loop(tmp_path) -> None:
     scheduler = application.bot_data["scheduler"]
 
     job_ids = {job.id for job in scheduler.get_jobs()}
-    assert job_ids == {"ltac_hourly_max_forecast"}
+    assert job_ids == {"ltac_hourly_max_forecast", "metar_sensor_alerts"}
 
     await _start_scheduler(application)
     assert scheduler.running
@@ -113,4 +127,4 @@ def test_scheduler_legacy_mode_disables_hourly_job(tmp_path) -> None:
 
     job_ids = {job.id for job in application.bot_data["scheduler"].get_jobs()}
     assert "ltac_hourly_max_forecast" not in job_ids
-    assert job_ids == {"ltac_0900", "ltac_1200", "ltac_1500", "ltac_2100"}
+    assert job_ids == {"ltac_0900", "ltac_1200", "ltac_1500", "ltac_2100", "metar_sensor_alerts"}

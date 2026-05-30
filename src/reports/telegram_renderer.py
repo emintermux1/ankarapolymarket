@@ -189,7 +189,29 @@ class TelegramReportRenderer:
     def now_report(self, metar: METARNormalized | None) -> str:
         if metar is None:
             return "LTAC METAR verisi yok."
-        return "\n".join(["LTAC SON GÖZLEM", *self._metar_lines(metar)])
+        return "\n".join([f"{metar.station} SON GÖZLEM", *self._metar_lines(metar)])
+
+    def metar_alert(self, metar: METARNormalized) -> str:
+        observed_local = metar.observation_time.astimezone(self.tz)
+        fetched_local = metar.fetch_timestamp.astimezone(self.tz)
+        return "\n".join(
+            [
+                f"🚨 {metar.station} YENİ METAR/SENSÖR",
+                f"Zaman: {observed_local:%Y-%m-%d %H:%M} {self.tz.key} · {metar.observation_time:%H:%M} UTC",
+                f"Kaynak: {metar.source} · çekim {fetched_local:%H:%M:%S}",
+                "",
+                f"Sıcaklık: {metar.temperature_c:.1f}°C · çiy {metar.dew_point_c:.1f}°C · nem %{metar.relative_humidity if metar.relative_humidity is not None else 'veri yok'}",
+                f"Rüzgâr: {_metar_wind_text(metar)}",
+                f"Basınç: {_fmt_num(metar.pressure_hpa)} hPa",
+                f"Görüş: {_format_visibility_m(metar.visibility_m)}",
+                f"Bulut: {_format_clouds(metar.cloud_layers)}",
+                f"Hava olayı: {_metar_weather_text(metar)}",
+                "",
+                *_metar_extra_sensor_lines(metar),
+                "",
+                f"Raw: {metar.raw_text or 'veri yok'}",
+            ]
+        )
 
     def taf_report(self, taf: TAFNormalized | None) -> str:
         if taf is None:
@@ -1171,6 +1193,78 @@ def _format_clouds(clouds: list[dict]) -> str:
     if not clouds:
         return "veri yok"
     return ", ".join(f"{cloud.get('cover', '?')}{cloud.get('base', '')}" for cloud in clouds)
+
+
+def _metar_wind_text(metar: METARNormalized) -> str:
+    direction = f"{metar.wind_direction_deg:03d}°" if metar.wind_direction_deg is not None else "VRB"
+    gust = f" G{metar.wind_gust_kt:.0f}" if metar.wind_gust_kt is not None else ""
+    return f"{direction}/{metar.wind_speed_kt:.0f}{gust} KT"
+
+
+def _format_visibility_m(value: int | None) -> str:
+    if value is None:
+        return "veri yok"
+    if value >= 9999:
+        return f"10 km+ ({value} m)"
+    return f"{value} m"
+
+
+def _metar_weather_text(metar: METARNormalized) -> str:
+    raw = metar.raw_json or {}
+    wx = raw.get("wxString") or raw.get("flight_category")
+    if wx:
+        return str(wx)
+    conditions = raw.get("conditions")
+    if isinstance(conditions, list) and conditions:
+        parts = []
+        for item in conditions:
+            if isinstance(item, dict):
+                parts.append(str(item.get("code") or item.get("text") or item.get("summary") or item))
+            else:
+                parts.append(str(item))
+        return ", ".join(parts)
+    return "yok"
+
+
+def _metar_extra_sensor_lines(metar: METARNormalized) -> list[str]:
+    raw = metar.raw_json or {}
+    groups = [
+        (
+            "Ek sensör",
+            [
+                ("tip", raw.get("metarType")),
+                ("SLP", raw.get("slp")),
+                ("basınç trend", raw.get("presTend")),
+                ("dikey görüş", raw.get("vertVis")),
+                ("QC", raw.get("qcField")),
+            ],
+        ),
+        (
+            "Yağış/kar",
+            [
+                ("anlık", raw.get("precip")),
+                ("3s", raw.get("pcp3hr")),
+                ("6s", raw.get("pcp6hr")),
+                ("24s", raw.get("pcp24hr")),
+                ("kar", raw.get("snow")),
+            ],
+        ),
+        (
+            "Sıcaklık uçları",
+            [
+                ("maxT", raw.get("maxT")),
+                ("minT", raw.get("minT")),
+                ("maxT24", raw.get("maxT24")),
+                ("minT24", raw.get("minT24")),
+            ],
+        ),
+    ]
+    lines = []
+    for label, values in groups:
+        parts = [f"{key}={value}" for key, value in values if value not in (None, "", "M")]
+        if parts:
+            lines.append(f"{label}: {', '.join(parts)}")
+    return lines or ["Ek sensör: normalized METAR alanları dışında ek ham sensör yok"]
 
 
 def _bundle_values(bundle: ModelBundle, field: str) -> list[float]:

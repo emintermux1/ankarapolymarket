@@ -13,10 +13,11 @@ class Base(DeclarativeBase):
 
 class Observation(Base):
     __tablename__ = "observations"
+    __table_args__ = (UniqueConstraint("station", "observation_time"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fetch_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    observation_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), unique=True, nullable=False)
+    observation_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     station: Mapped[str] = mapped_column(String(16), nullable=False, default="LTAC")
     temperature_c: Mapped[float] = mapped_column(Float, nullable=False)
     dew_point_c: Mapped[float] = mapped_column(Float, nullable=False)
