@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -282,27 +281,31 @@ async def _send_aviation_source_alerts(application: Application, service: Foreca
         logger.warning("telegram aviation source watch chat id is not configured")
         return
     now = datetime.now(timezone.utc)
-    for snapshot in await service.fetch_aviation_source_snapshots():
+    snapshots = await service.fetch_aviation_source_snapshots()
+    new_snapshots = []
+    new_keys = set()
+    for snapshot in snapshots:
         key = f"telegram:aviation-source:{snapshot.station}:{snapshot.source}:{snapshot.kind}:{snapshot.fingerprint}"
         if service.repository.telegram_delivery_exists(key):
             logger.info("%s %s source alert already sent for %s", snapshot.station, snapshot.source, snapshot.fingerprint)
             continue
-        text = await service.render_aviation_source_alert(snapshot)
-        try:
-            await _send_long(application, chat_id, text)
-        except Exception as exc:
-            logger.warning(
-                "failed to send %s %s source alert %s: %s",
-                snapshot.station,
-                snapshot.source,
-                snapshot.fingerprint,
-                exc,
-            )
-            continue
+        new_snapshots.append(snapshot)
+        new_keys.add(key)
+    if not new_snapshots:
+        logger.info("aviation source watch found no new fingerprints")
+        return
+    text = await service.render_aviation_source_digest(snapshots, new_keys)
+    try:
+        await _send_long(application, chat_id, text)
+    except Exception as exc:
+        logger.warning("failed to send aviation source digest: %s", exc)
+        return
+    for snapshot in new_snapshots:
+        key = f"telegram:aviation-source:{snapshot.station}:{snapshot.source}:{snapshot.kind}:{snapshot.fingerprint}"
         service.repository.save_telegram_delivery(
             key=key,
             chat_id=str(chat_id),
-            kind="aviation_source_alert",
+            kind="aviation_source_digest",
             target_date=now.date(),
             scheduled_for=now,
             payload={
@@ -314,7 +317,6 @@ async def _send_aviation_source_alerts(application: Application, service: Foreca
                 "sent_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        await asyncio.sleep(1)
 
 
 async def _send_long(application: Application, chat_id: str, text: str) -> None:

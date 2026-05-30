@@ -219,6 +219,46 @@ def test_aviation_source_alert_renders_link_and_summary() -> None:
     assert "LTFM 300920Z 23018KT" in text
 
 
+def test_aviation_source_digest_marks_new_items_and_keeps_links_compact() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 30, 9, 20, tzinfo=timezone.utc)
+    snapshots = [
+        AviationSourceSnapshot(
+            source="NOAA",
+            station="LTFM",
+            kind="raw_metar_fast_fallback",
+            title="LTFM NOAA raw METAR",
+            source_url="https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTFM.TXT",
+            fetch_timestamp=now,
+            observed_at=now,
+            summary_lines=["LTFM 300920Z 23018KT CAVOK 22/09 Q1016 NOSIG"],
+            fingerprint="abc123",
+        ),
+        AviationSourceSnapshot(
+            source="Aviapages",
+            station="LTAC",
+            kind="notam_airport_metadata",
+            title="Esenboga",
+            source_url="https://aviapages.com/api/v1/airports/LTAC/",
+            fetch_timestamp=now,
+            summary_lines=["icao: LTAC", "iata: ESB"],
+            fingerprint="def456",
+        ),
+    ]
+
+    text = renderer.aviation_source_digest(
+        snapshots,
+        {"telegram:aviation-source:LTAC:Aviapages:notam_airport_metadata:def456"},
+    )
+
+    assert text.startswith("🛰 HAVACILIK KAYNAK ÖZETİ")
+    assert "Kaynak: 2 kayıt · yeni: 1" in text
+    assert "• [yeni] Aviapages: Esenboga | icao: LTAC | iata: ESB" in text
+    assert "• [aynı] NOAA: LTFM NOAA raw METAR | LTFM 300920Z" in text
+    assert text.count("Link: ") == 2
+
+
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)

@@ -226,6 +226,33 @@ class TelegramReportRenderer:
             ]
         )
 
+    def aviation_source_digest(self, snapshots: list[AviationSourceSnapshot], new_snapshot_keys: set[str] | None = None) -> str:
+        if not snapshots:
+            return "Havacılık kaynak özeti: yeni veri yok."
+        new_snapshot_keys = new_snapshot_keys or {_aviation_source_snapshot_key(snapshot) for snapshot in snapshots}
+        fetched_local = max(snapshot.fetch_timestamp for snapshot in snapshots).astimezone(self.tz)
+        new_count = sum(1 for snapshot in snapshots if _aviation_source_snapshot_key(snapshot) in new_snapshot_keys)
+        lines = [
+            "🛰 HAVACILIK KAYNAK ÖZETİ",
+            f"Çekim: {fetched_local:%Y-%m-%d %H:%M:%S} {self.tz.key}",
+            f"Kaynak: {len(snapshots)} kayıt · yeni: {new_count}",
+            "",
+        ]
+        for station in sorted({snapshot.station for snapshot in snapshots}):
+            lines.append(station)
+            for snapshot in sorted(
+                [item for item in snapshots if item.station == station],
+                key=lambda item: (item.source, item.kind),
+            ):
+                marker = "yeni" if _aviation_source_snapshot_key(snapshot) in new_snapshot_keys else "aynı"
+                observed = snapshot.observed_at.astimezone(self.tz) if snapshot.observed_at else None
+                observed_text = f" · veri {observed:%H:%M}" if observed else ""
+                summary = _compact_source_summary(snapshot)
+                lines.append(f"• [{marker}] {snapshot.source}: {summary}{observed_text}")
+                lines.append(f"  Link: {snapshot.source_url}")
+            lines.append("")
+        return "\n".join(lines).strip()
+
     def aviation_source_alert(self, snapshot: AviationSourceSnapshot) -> str:
         fetched_local = snapshot.fetch_timestamp.astimezone(self.tz)
         observed = snapshot.observed_at.astimezone(self.tz) if snapshot.observed_at else None
@@ -940,6 +967,19 @@ class TelegramReportRenderer:
 
 def _bullet(text: str) -> str:
     return f"• {text}"
+
+
+def _compact_source_summary(snapshot: AviationSourceSnapshot) -> str:
+    pieces = [snapshot.title, *snapshot.summary_lines[:2]]
+    text = " | ".join(piece.strip() for piece in pieces if piece and piece.strip())
+    text = " ".join(text.split())
+    if len(text) > 220:
+        return f"{text[:217]}..."
+    return text or snapshot.kind
+
+
+def _aviation_source_snapshot_key(snapshot: AviationSourceSnapshot) -> str:
+    return f"telegram:aviation-source:{snapshot.station}:{snapshot.source}:{snapshot.kind}:{snapshot.fingerprint}"
 
 
 def _report_title(label: str | None) -> str:

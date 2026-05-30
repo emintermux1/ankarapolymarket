@@ -58,8 +58,7 @@ def main() -> None:
         return
     if args.command == "aviation-sources":
         snapshots = asyncio.run(service.fetch_aviation_source_snapshots())
-        reports = [asyncio.run(service.render_aviation_source_alert(snapshot)) for snapshot in snapshots]
-        print("\n\n".join(reports) if reports else "Havacılık kaynak verisi yok.")
+        print(asyncio.run(service.render_aviation_source_digest(snapshots)))
         return
     if args.command == "aviation":
         print(asyncio.run(service.render_aviation(target_date=target)))

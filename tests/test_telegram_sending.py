@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.bot import scheduler as scheduler_module
 from src.bot.commands import _reply_long
 from src.bot.scheduler import _send_aviation_source_alerts, _send_long, _send_metar_alerts
 from src.data_sources.schemas import AviationSourceSnapshot, METARNormalized
@@ -78,25 +77,37 @@ async def test_metar_alert_sends_new_station_observation_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_aviation_source_watch_sends_each_fingerprint_once() -> None:
+async def test_aviation_source_watch_sends_single_digest_for_new_fingerprints() -> None:
     now = datetime.now(timezone.utc)
-    snapshot = AviationSourceSnapshot(
-        source="NOAA",
-        station="LTAC",
-        kind="raw_metar_fast_fallback",
-        title="LTAC NOAA raw METAR",
-        source_url="https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTAC.TXT",
-        fetch_timestamp=now,
-        observed_at=now,
-        summary_lines=["LTAC 300920Z VRB06KT 9999 SCT040 15/01 Q1018 NOSIG"],
-        fingerprint="abc123",
-    )
+    snapshots = [
+        AviationSourceSnapshot(
+            source="NOAA",
+            station="LTAC",
+            kind="raw_metar_fast_fallback",
+            title="LTAC NOAA raw METAR",
+            source_url="https://tgftp.nws.noaa.gov/data/observations/metar/stations/LTAC.TXT",
+            fetch_timestamp=now,
+            observed_at=now,
+            summary_lines=["LTAC 300920Z VRB06KT 9999 SCT040 15/01 Q1018 NOSIG"],
+            fingerprint="abc123",
+        ),
+        AviationSourceSnapshot(
+            source="IFATC",
+            station="LTAC",
+            kind="airport_runway_frequency_metadata",
+            title="LTAC IFATC airport info",
+            source_url="https://www.ifatc.org/airports?apt=LTAC",
+            fetch_timestamp=now,
+            summary_lines=["Tower 118.1"],
+            fingerprint="def456",
+        ),
+    ]
     repository = _FakeRepository()
     service = SimpleNamespace(
         settings=SimpleNamespace(telegram_aviation_source_watch_target_chat_id="@ankarapm"),
         repository=repository,
-        fetch_aviation_source_snapshots=AsyncMock(return_value=[snapshot]),
-        render_aviation_source_alert=AsyncMock(return_value="LTAC NOAA alert"),
+        fetch_aviation_source_snapshots=AsyncMock(return_value=snapshots),
+        render_aviation_source_digest=AsyncMock(return_value="single digest"),
     )
     bot = SimpleNamespace(send_message=AsyncMock())
     application = SimpleNamespace(bot=bot)
@@ -105,13 +116,20 @@ async def test_aviation_source_watch_sends_each_fingerprint_once() -> None:
     await _send_aviation_source_alerts(application, service)
 
     assert bot.send_message.call_count == 1
-    assert bot.send_message.call_args.kwargs["text"] == "LTAC NOAA alert"
-    assert repository.saved[0]["kind"] == "aviation_source_alert"
-    assert "abc123" in repository.saved[0]["key"]
+    assert bot.send_message.call_args.kwargs["text"] == "single digest"
+    assert service.render_aviation_source_digest.call_args.args == (
+        snapshots,
+        {
+            "telegram:aviation-source:LTAC:NOAA:raw_metar_fast_fallback:abc123",
+            "telegram:aviation-source:LTAC:IFATC:airport_runway_frequency_metadata:def456",
+        },
+    )
+    assert [item["kind"] for item in repository.saved] == ["aviation_source_digest", "aviation_source_digest"]
+    assert {"abc123", "def456"} == {item["payload"]["fingerprint"] for item in repository.saved}
 
 
 @pytest.mark.asyncio
-async def test_aviation_source_watch_continues_after_send_timeout(monkeypatch) -> None:
+async def test_aviation_source_watch_does_not_mark_digest_delivered_after_send_timeout() -> None:
     now = datetime.now(timezone.utc)
     snapshots = [
         AviationSourceSnapshot(
@@ -140,17 +158,15 @@ async def test_aviation_source_watch_continues_after_send_timeout(monkeypatch) -
         settings=SimpleNamespace(telegram_aviation_source_watch_target_chat_id="@ankarapm"),
         repository=repository,
         fetch_aviation_source_snapshots=AsyncMock(return_value=snapshots),
-        render_aviation_source_alert=AsyncMock(side_effect=["first alert", "second alert"]),
+        render_aviation_source_digest=AsyncMock(return_value="single digest"),
     )
-    bot = SimpleNamespace(send_message=AsyncMock(side_effect=[TimeoutError("slow"), None]))
+    bot = SimpleNamespace(send_message=AsyncMock(side_effect=TimeoutError("slow")))
     application = SimpleNamespace(bot=bot)
-    monkeypatch.setattr(scheduler_module.asyncio, "sleep", AsyncMock())
 
     await _send_aviation_source_alerts(application, service)
 
-    assert bot.send_message.call_count == 2
-    assert len(repository.saved) == 1
-    assert "second" in repository.saved[0]["key"]
+    assert bot.send_message.call_count == 1
+    assert repository.saved == []
 
 
 class _FakeRepository:
