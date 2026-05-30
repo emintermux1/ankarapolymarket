@@ -6,7 +6,7 @@ import pytest
 
 from src.config import Settings
 from src.data_sources.base import SourceError
-from src.data_sources.aviation_watch import AviationWatchAdapter, _noaa_snapshot
+from src.data_sources.aviation_watch import AviationWatchAdapter, _noaa_snapshot, _noaa_taf_snapshot
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
@@ -60,6 +60,91 @@ def test_noaa_raw_metar_snapshot_parses_time_and_fingerprint() -> None:
     assert snapshot.observed_at == datetime(2026, 5, 30, 9, 20, tzinfo=timezone.utc)
     assert snapshot.summary_lines == ["LTAC 300920Z VRB06KT 9999 SCT040 15/01 Q1018 NOSIG"]
     assert len(snapshot.fingerprint) == 16
+
+
+def test_noaa_raw_taf_snapshot_parses_time_and_compacts_multiline_text() -> None:
+    snapshot = _noaa_taf_snapshot(
+        "LTAC",
+        "https://tgftp.nws.noaa.gov/data/forecasts/taf/stations/LTAC.TXT",
+        "2026/05/30 12:03\nTAF LTAC 301040Z 3012/3112 25012KT 9999 SCT040\n      BECMG 3015/3018 VRB02KT\n",
+    )
+
+    assert snapshot.source == "NOAA"
+    assert snapshot.kind == "raw_taf_fast_fallback"
+    assert snapshot.observed_at == datetime(2026, 5, 30, 12, 3, tzinfo=timezone.utc)
+    assert snapshot.summary_lines == ["TAF LTAC 301040Z 3012/3112 25012KT 9999 SCT040 BECMG 3015/3018 VRB02KT"]
+
+
+@pytest.mark.asyncio
+async def test_aviation_watch_fetches_aviationweather_metar_snapshot(monkeypatch) -> None:
+    adapter = AviationWatchAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert url == "https://aviationweather.gov/api/data/metar"
+        assert kwargs["params"] == {"ids": "LTAC", "format": "json"}
+        return [
+            {
+                "icaoId": "LTAC",
+                "reportTime": "2026-05-30T11:00:00Z",
+                "temp": 15,
+                "dewp": 2,
+                "wdir": 260,
+                "wspd": 7,
+                "wgst": 17,
+                "altim": 1017,
+                "visib": "6+",
+                "fltCat": "VFR",
+                "clouds": [{"cover": "SCT", "base": 4000}],
+                "rawOb": "METAR LTAC 301050Z 26007G17KT 9999 SCT040 15/02 Q1017",
+            }
+        ]
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    snapshot = await adapter.get_aviationweather_metar("ltac")
+
+    assert snapshot.source == "AviationWeather"
+    assert snapshot.kind == "official_metar_json"
+    assert snapshot.observed_at == datetime(2026, 5, 30, 11, 0, tzinfo=timezone.utc)
+    assert "wind 260/7G17kt" in snapshot.summary_lines[1]
+
+
+@pytest.mark.asyncio
+async def test_aviation_watch_fetches_aviationweather_taf_snapshot(monkeypatch) -> None:
+    adapter = AviationWatchAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert url == "https://aviationweather.gov/api/data/taf"
+        assert kwargs["params"] == {"ids": "LTFM", "format": "json"}
+        return [
+            {
+                "icaoId": "LTFM",
+                "issueTime": "2026-05-30T10:40:00Z",
+                "rawTAF": "TAF LTFM 301040Z 3012/3118 22017G27KT CAVOK",
+                "fcsts": [
+                    {
+                        "timeFrom": 1780142400,
+                        "timeTo": 1780160400,
+                        "fcstChange": None,
+                        "wdir": 220,
+                        "wspd": 17,
+                        "wgst": 27,
+                        "wxString": "NSW",
+                        "clouds": [{"cover": "NSC"}],
+                    }
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    snapshot = await adapter.get_aviationweather_taf("ltfm")
+
+    assert snapshot.source == "AviationWeather"
+    assert snapshot.kind == "official_taf_json"
+    assert snapshot.observed_at == datetime(2026, 5, 30, 10, 40, tzinfo=timezone.utc)
+    assert snapshot.summary_lines[0].startswith("TAF LTFM")
+    assert any("wind 220/17G27kt" in line for line in snapshot.summary_lines)
 
 
 @pytest.mark.asyncio
