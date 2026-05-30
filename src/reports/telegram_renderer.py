@@ -232,26 +232,40 @@ class TelegramReportRenderer:
         if new_snapshot_keys is None:
             new_snapshot_keys = {_aviation_source_snapshot_key(snapshot) for snapshot in snapshots}
         fetched_local = max(snapshot.fetch_timestamp for snapshot in snapshots).astimezone(self.tz)
-        new_count = sum(1 for snapshot in snapshots if _aviation_source_snapshot_key(snapshot) in new_snapshot_keys)
+        new_snapshots = [snapshot for snapshot in snapshots if _aviation_source_snapshot_key(snapshot) in new_snapshot_keys]
+        new_count = len(new_snapshots)
+        unchanged_count = len(snapshots) - new_count
         lines = [
             "🛰 HAVACILIK KAYNAK ÖZETİ",
             f"Çekim: {fetched_local:%Y-%m-%d %H:%M:%S} {self.tz.key}",
-            f"Kaynak: {len(snapshots)} kayıt · yeni: {new_count}",
-            "",
+            f"Kaynak: {len(snapshots)} kontrol · yeni: {new_count}",
         ]
+        if not new_snapshots:
+            lines.extend(
+                [
+                    f"Durum: yeni değişiklik yok · detay tekrarı yok · istasyonlar: {', '.join(sorted({snapshot.station for snapshot in snapshots}))}",
+                    *_latest_aviation_metar_lines(snapshots, self.tz),
+                ]
+            )
+            return "\n".join(lines).strip()
+        lines.append("")
         for station in sorted({snapshot.station for snapshot in snapshots}):
-            lines.append(station)
+            station_snapshots = [item for item in new_snapshots if item.station == station]
+            if not station_snapshots:
+                continue
+            lines.append(f"{station} yeni")
             for snapshot in sorted(
-                [item for item in snapshots if item.station == station],
+                station_snapshots,
                 key=lambda item: (item.source, item.kind),
             ):
-                marker = "yeni" if _aviation_source_snapshot_key(snapshot) in new_snapshot_keys else "aynı"
                 observed = snapshot.observed_at.astimezone(self.tz) if snapshot.observed_at else None
                 observed_text = f" · veri {observed:%H:%M}" if observed else ""
                 summary = _compact_source_summary(snapshot)
-                lines.append(f"• [{marker}] {snapshot.source}: {summary}{observed_text}")
+                lines.append(f"• {snapshot.source}: {summary}{observed_text}")
                 lines.append(f"  Link: {snapshot.source_url}")
             lines.append("")
+        if unchanged_count:
+            lines.append(f"Aynı kalan: {unchanged_count} kaynak · detay tekrarı yapılmadı.")
         return "\n".join(lines).strip()
 
     def aviation_source_alert(self, snapshot: AviationSourceSnapshot) -> str:
@@ -981,6 +995,17 @@ def _compact_source_summary(snapshot: AviationSourceSnapshot) -> str:
 
 def _aviation_source_snapshot_key(snapshot: AviationSourceSnapshot) -> str:
     return f"telegram:aviation-source:{snapshot.station}:{snapshot.source}:{snapshot.kind}:{snapshot.fingerprint}"
+
+
+def _latest_aviation_metar_lines(snapshots: list[AviationSourceSnapshot], tz: ZoneInfo) -> list[str]:
+    lines = []
+    for snapshot in sorted(snapshots, key=lambda item: item.station):
+        if snapshot.source != "NOAA" or not snapshot.summary_lines:
+            continue
+        observed = snapshot.observed_at.astimezone(tz) if snapshot.observed_at else None
+        observed_text = f" · veri {observed:%H:%M}" if observed else ""
+        lines.append(f"{snapshot.station} METAR: {snapshot.summary_lines[0]}{observed_text}")
+    return lines
 
 
 def _report_title(label: str | None) -> str:
