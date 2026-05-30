@@ -244,7 +244,7 @@ class TelegramReportRenderer:
             lines.extend(
                 [
                     f"Durum: yeni değişiklik yok · detay tekrarı yok · istasyonlar: {', '.join(sorted({snapshot.station for snapshot in snapshots}))}",
-                    *_latest_aviation_metar_lines(snapshots, self.tz),
+                    *_latest_aviation_status_lines(snapshots, self.tz),
                 ]
             )
             return "\n".join(lines).strip()
@@ -997,15 +997,41 @@ def _aviation_source_snapshot_key(snapshot: AviationSourceSnapshot) -> str:
     return f"telegram:aviation-source:{snapshot.station}:{snapshot.source}:{snapshot.kind}:{snapshot.fingerprint}"
 
 
-def _latest_aviation_metar_lines(snapshots: list[AviationSourceSnapshot], tz: ZoneInfo) -> list[str]:
+def _latest_aviation_status_lines(snapshots: list[AviationSourceSnapshot], tz: ZoneInfo) -> list[str]:
     lines = []
-    for snapshot in sorted(snapshots, key=lambda item: item.station):
-        if snapshot.source != "NOAA" or not snapshot.summary_lines:
-            continue
-        observed = snapshot.observed_at.astimezone(tz) if snapshot.observed_at else None
-        observed_text = f" · veri {observed:%H:%M}" if observed else ""
-        lines.append(f"{snapshot.station} METAR: {snapshot.summary_lines[0]}{observed_text}")
+    for station in sorted({snapshot.station for snapshot in snapshots}):
+        metar = _first_aviation_snapshot(
+            snapshots,
+            station=station,
+            kinds=("official_metar_json", "raw_metar_fast_fallback", "metar_archive_mirror"),
+        )
+        taf = _first_aviation_snapshot(snapshots, station=station, kinds=("official_taf_json", "raw_taf_fast_fallback"))
+        if metar and metar.summary_lines:
+            observed = metar.observed_at.astimezone(tz) if metar.observed_at else None
+            observed_text = f" · veri {observed:%H:%M}" if observed else ""
+            lines.append(f"{station} METAR: {_short_text(metar.summary_lines[0], 170)}{observed_text}")
+        if taf and taf.summary_lines:
+            observed = taf.observed_at.astimezone(tz) if taf.observed_at else None
+            observed_text = f" · yayın {observed:%H:%M}" if observed else ""
+            lines.append(f"{station} TAF: {_short_text(taf.summary_lines[0], 170)}{observed_text}")
     return lines
+
+
+def _first_aviation_snapshot(
+    snapshots: list[AviationSourceSnapshot],
+    *,
+    station: str,
+    kinds: tuple[str, ...],
+) -> AviationSourceSnapshot | None:
+    candidates = [snapshot for snapshot in snapshots if snapshot.station == station and snapshot.kind in kinds]
+    return max(candidates, key=lambda item: item.observed_at or item.fetch_timestamp) if candidates else None
+
+
+def _short_text(text: str, limit: int) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 3]}..."
 
 
 def _report_title(label: str | None) -> str:

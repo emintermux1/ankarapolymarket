@@ -269,6 +269,42 @@ def test_aviation_source_digest_marks_new_items_and_keeps_links_compact() -> Non
     assert "[aynı]" not in unchanged_text
 
 
+def test_aviation_source_digest_heartbeat_includes_taf_status() -> None:
+    settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
+    renderer = TelegramReportRenderer(settings)
+    now = datetime(2026, 5, 30, 9, 20, tzinfo=timezone.utc)
+    snapshots = [
+        AviationSourceSnapshot(
+            source="AviationWeather",
+            station="LTAC",
+            kind="official_metar_json",
+            title="LTAC official METAR",
+            source_url="https://aviationweather.gov/api/data/metar?ids=LTAC&format=json",
+            fetch_timestamp=now,
+            observed_at=now,
+            summary_lines=["METAR LTAC 300920Z 26007G17KT 9999 SCT040 15/02 Q1017"],
+            fingerprint="metar",
+        ),
+        AviationSourceSnapshot(
+            source="AviationWeather",
+            station="LTAC",
+            kind="official_taf_json",
+            title="LTAC official TAF",
+            source_url="https://aviationweather.gov/api/data/taf?ids=LTAC&format=json",
+            fetch_timestamp=now,
+            observed_at=now,
+            summary_lines=["TAF LTAC 301040Z 3012/3112 25012KT 9999 SCT040 BECMG 3015/3018 VRB02KT"],
+            fingerprint="taf",
+        ),
+    ]
+
+    text = renderer.aviation_source_digest(snapshots, set())
+
+    assert "LTAC METAR: METAR LTAC 300920Z 26007G17KT" in text
+    assert "LTAC TAF: TAF LTAC 301040Z 3012/3112" in text
+    assert "Link: " not in text
+
+
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
     renderer = TelegramReportRenderer(settings)

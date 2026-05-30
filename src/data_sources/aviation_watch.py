@@ -43,7 +43,10 @@ class AviationWatchAdapter(HttpSource):
         stations = self.settings.aviation_source_watch_station_keys
         tasks = []
         for station in stations:
+            tasks.append(self._safe(self.get_aviationweather_metar(station)))
+            tasks.append(self._safe(self.get_aviationweather_taf(station)))
             tasks.append(self._safe(self.get_noaa_metar(station)))
+            tasks.append(self._safe(self.get_noaa_taf(station)))
             tasks.append(self._safe(self.get_bigorre_notam(station)))
             if station in SKYVECTOR_URLS:
                 tasks.append(self._safe(self.get_skyvector_airport(station)))
@@ -54,11 +57,53 @@ class AviationWatchAdapter(HttpSource):
         results = await asyncio.gather(*tasks)
         return [snapshot for snapshot in results if snapshot is not None]
 
+    async def get_aviationweather_metar(self, station: str) -> AviationSourceSnapshot:
+        station_id = station.strip().upper()
+        url = "https://aviationweather.gov/api/data/metar"
+        payload = await self._request_json(url, params={"ids": station_id, "format": "json"})
+        row = _first_payload_object(payload, "AviationWeather METAR")
+        observed_at = _parse_aw_time(row.get("reportTime"), row.get("obsTime"))
+        return _snapshot(
+            source="AviationWeather",
+            station=station_id,
+            kind="official_metar_json",
+            title=f"{station_id} AviationWeather official METAR",
+            source_url=f"{url}?ids={station_id}&format=json",
+            summary_lines=_aviationweather_metar_lines(row),
+            observed_at=observed_at,
+            raw_json=row,
+            raw_text=json.dumps(row, sort_keys=True, ensure_ascii=False)[:4000],
+        )
+
+    async def get_aviationweather_taf(self, station: str) -> AviationSourceSnapshot:
+        station_id = station.strip().upper()
+        url = "https://aviationweather.gov/api/data/taf"
+        payload = await self._request_json(url, params={"ids": station_id, "format": "json"})
+        row = _first_payload_object(payload, "AviationWeather TAF")
+        issued_at = _parse_iso(row.get("issueTime")) or _parse_iso(row.get("bulletinTime"))
+        return _snapshot(
+            source="AviationWeather",
+            station=station_id,
+            kind="official_taf_json",
+            title=f"{station_id} AviationWeather official TAF",
+            source_url=f"{url}?ids={station_id}&format=json",
+            summary_lines=_aviationweather_taf_lines(row),
+            observed_at=issued_at,
+            raw_json=row,
+            raw_text=json.dumps(row, sort_keys=True, ensure_ascii=False)[:4000],
+        )
+
     async def get_noaa_metar(self, station: str) -> AviationSourceSnapshot:
         station_id = station.strip().upper()
         url = f"https://tgftp.nws.noaa.gov/data/observations/metar/stations/{station_id}.TXT"
         text = await self._request_text(url)
         return _noaa_snapshot(station_id, url, text)
+
+    async def get_noaa_taf(self, station: str) -> AviationSourceSnapshot:
+        station_id = station.strip().upper()
+        url = f"https://tgftp.nws.noaa.gov/data/forecasts/taf/stations/{station_id}.TXT"
+        text = await self._request_text(url)
+        return _noaa_taf_snapshot(station_id, url, text)
 
     async def get_skyvector_airport(self, station: str) -> AviationSourceSnapshot:
         station_id = station.strip().upper()
@@ -254,6 +299,25 @@ def _noaa_snapshot(station: str, url: str, text: str) -> AviationSourceSnapshot:
     )
 
 
+def _noaa_taf_snapshot(station: str, url: str, text: str) -> AviationSourceSnapshot:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    issued_at = _parse_noaa_time(lines[0]) if lines else None
+    taf_lines = lines[1:] if len(lines) > 1 else []
+    taf = " ".join(taf_lines) if taf_lines else "NOAA TAF text empty"
+    taf = re.sub(r"\s+", " ", taf).strip()
+    taf = re.sub(r"^TAF\s+TAF\s+", "TAF ", taf)
+    return _snapshot(
+        source="NOAA",
+        station=station,
+        kind="raw_taf_fast_fallback",
+        title=f"{station} NOAA raw TAF",
+        source_url=url,
+        summary_lines=[taf],
+        observed_at=issued_at,
+        raw_text=text,
+    )
+
+
 def _snapshot(
     *,
     source: str,
@@ -288,6 +352,116 @@ def _parse_noaa_time(value: str) -> datetime | None:
         return datetime.strptime(value.strip(), "%Y/%m/%d %H:%M").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    text = str(value).replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _parse_aw_time(report_time: Any, obs_time: Any) -> datetime | None:
+    parsed = _parse_iso(report_time)
+    if parsed:
+        return parsed
+    if obs_time is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(obs_time), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _first_payload_object(payload: object, label: str) -> dict[str, Any]:
+    if not isinstance(payload, list) or not payload:
+        raise SourceError("AviationWatch", f"{label} payload is empty")
+    row = payload[0]
+    if not isinstance(row, dict):
+        raise SourceError("AviationWatch", f"{label} payload is not an object")
+    return row
+
+
+def _aviationweather_metar_lines(row: dict[str, Any]) -> list[str]:
+    raw = str(row.get("rawOb") or "").strip()
+    lines = [raw] if raw else []
+    wind = _wind_line(row.get("wdir"), row.get("wspd"), row.get("wgst"))
+    parts = [
+        f"temp {row.get('temp')}°C" if row.get("temp") not in (None, "") else "",
+        f"dew {row.get('dewp')}°C" if row.get("dewp") not in (None, "") else "",
+        wind,
+        f"QNH {row.get('altim')}" if row.get("altim") not in (None, "") else "",
+        f"vis {row.get('visib')}" if row.get("visib") not in (None, "") else "",
+        f"flt {row.get('fltCat')}" if row.get("fltCat") not in (None, "") else "",
+    ]
+    status = " · ".join(part for part in parts if part)
+    if status:
+        lines.append(status)
+    clouds = _cloud_line(row.get("clouds"))
+    if clouds:
+        lines.append(clouds)
+    return lines or ["AviationWeather METAR JSON fetched"]
+
+
+def _aviationweather_taf_lines(row: dict[str, Any]) -> list[str]:
+    lines = []
+    raw = str(row.get("rawTAF") or "").strip()
+    if raw:
+        lines.append(raw)
+    for period in row.get("fcsts") or []:
+        if not isinstance(period, dict):
+            continue
+        period_line = _taf_period_line(period)
+        if period_line:
+            lines.append(period_line)
+        if len(lines) >= 4:
+            break
+    return lines or ["AviationWeather TAF JSON fetched"]
+
+
+def _taf_period_line(period: dict[str, Any]) -> str:
+    start = _parse_aw_time(None, period.get("timeFrom"))
+    end = _parse_aw_time(None, period.get("timeTo"))
+    window = f"{start:%d %H:%M}-{end:%d %H:%M} UTC" if start and end else "TAF period"
+    change = period.get("fcstChange") or "BASE"
+    probability = f" PROB{period.get('probability')}" if period.get("probability") not in (None, "") else ""
+    wind = _wind_line(period.get("wdir"), period.get("wspd"), period.get("wgst"))
+    weather = period.get("wxString") or "NSW"
+    clouds = _cloud_line(period.get("clouds"))
+    return " · ".join(part for part in [window, f"{change}{probability}", wind, str(weather), clouds] if part)
+
+
+def _wind_line(direction: Any, speed: Any, gust: Any = None) -> str:
+    if speed in (None, ""):
+        return ""
+    direction_text = "VRB" if direction in (None, "", "VRB") else str(direction)
+    gust_text = f"G{gust}" if gust not in (None, "") else ""
+    return f"wind {direction_text}/{speed}{gust_text}kt"
+
+
+def _cloud_line(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    parts = []
+    for cloud in value[:4]:
+        if not isinstance(cloud, dict):
+            continue
+        cover = cloud.get("cover")
+        base = cloud.get("base")
+        cloud_type = cloud.get("type")
+        item = str(cover or "")
+        if base not in (None, ""):
+            item = f"{item}{base}"
+        if cloud_type not in (None, ""):
+            item = f"{item}{cloud_type}"
+        if item:
+            parts.append(item)
+    return f"clouds {' '.join(parts)}" if parts else ""
 
 
 def _html_to_text(value: str) -> str:
