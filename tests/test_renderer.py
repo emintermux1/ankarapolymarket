@@ -258,6 +258,12 @@ def test_aviation_source_digest_marks_new_items_and_keeps_links_compact() -> Non
     assert "• [aynı] NOAA: LTFM NOAA raw METAR | LTFM 300920Z" in text
     assert text.count("Link: ") == 2
 
+    unchanged_text = renderer.aviation_source_digest(snapshots, set())
+
+    assert "Kaynak: 2 kayıt · yeni: 0" in unchanged_text
+    assert "• [aynı] Aviapages: Esenboga | icao: LTAC | iata: ESB" in unchanged_text
+    assert "• [yeni]" not in unchanged_text
+
 
 def test_renderer_does_not_show_ev_for_skipped_boundary_bet() -> None:
     settings = Settings(TELEGRAM_ADMIN_IDS="", TELEGRAM_BOT_TOKEN=None)
