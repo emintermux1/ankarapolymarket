@@ -147,6 +147,14 @@ class TelegramDelivery(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
 
+class NotificationState(Base):
+    __tablename__ = "notification_state"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+
 class BacktestScore(Base):
     __tablename__ = "backtest_scores"
 

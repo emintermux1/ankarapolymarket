@@ -127,4 +127,4 @@ def test_scheduler_legacy_mode_disables_hourly_job(tmp_path) -> None:
 
     job_ids = {job.id for job in application.bot_data["scheduler"].get_jobs()}
     assert "ltac_hourly_max_forecast" not in job_ids
-    assert job_ids == {"ltac_0900", "ltac_1200", "ltac_1500", "ltac_2100", "metar_sensor_alerts"}
+    assert job_ids == {"ltac_alert_watch", "ltac_daily_forecast", "ltac_market_resolve", "metar_sensor_alerts"}

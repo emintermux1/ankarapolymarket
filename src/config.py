@@ -221,6 +221,16 @@ class Settings(BaseSettings):
     schedule_midday_update: str = Field(default="12:00", alias="SCHEDULE_MIDDAY_UPDATE")
     schedule_risk_update: str = Field(default="15:00", alias="SCHEDULE_RISK_UPDATE")
     schedule_result_report: str = Field(default="21:00", alias="SCHEDULE_RESULT_REPORT")
+    telegram_alert_check_interval_minutes: int = Field(
+        default=30,
+        ge=5,
+        alias="TELEGRAM_ALERT_CHECK_INTERVAL_MINUTES",
+    )
+    telegram_forecast_change_threshold_c: float = Field(
+        default=0.5,
+        ge=0.1,
+        alias="TELEGRAM_FORECAST_CHANGE_THRESHOLD_C",
+    )
 
     weathercom_api_key: str | None = Field(default=None, alias="WEATHERCOM_API_KEY")
     openweather_api_key: str | None = Field(default=None, alias="OPENWEATHER_API_KEY")

@@ -298,6 +298,69 @@ class TelegramReportRenderer:
             ]
         )
 
+    def daily_alert(self, analysis: ForecastAnalysis, market: MarketSnapshot | None) -> str:
+        rounded = (
+            _settlement_integer_from_reported_temp(analysis.final_tmax_c)
+            if analysis.final_tmax_c is not None
+            else None
+        )
+        lines = [
+            f"ANKARA TAHMİN · {analysis.target_date.isoformat()}",
+            f"Tmax: {_fmt_c(analysis.final_tmax_c)}" + (f" → {rounded}°C" if rounded is not None else ""),
+            (
+                f"Aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)} "
+                f"· Güven: %{analysis.confidence_score}"
+            ),
+        ]
+        candidate = _best_market_candidate(analysis, market)
+        if candidate:
+            edge, bracket, fair, implied = candidate
+            lines.append(
+                f"En iyi aday: {bracket} · fair {_fmt_pct(fair)} "
+                f"· piyasa {_fmt_pct(implied)} · edge {_fmt_pp(edge)}"
+            )
+        if market and market.link:
+            lines.append(f"Market: {market.link}")
+        return "\n".join(lines)
+
+    def forecast_change_alert(self, analysis: ForecastAnalysis, previous: Mapping[str, Any]) -> str:
+        previous_tmax = _safe_float(previous.get("final_tmax_c"))
+        previous_rounded = previous.get("rounded_tmax_c")
+        current_rounded = (
+            _settlement_integer_from_reported_temp(analysis.final_tmax_c)
+            if analysis.final_tmax_c is not None
+            else None
+        )
+        delta = (
+            analysis.final_tmax_c - previous_tmax
+            if analysis.final_tmax_c is not None and previous_tmax is not None
+            else None
+        )
+        delta_text = f" ({delta:+.1f}°C)" if delta is not None else ""
+        return "\n".join(
+            [
+                f"TAHMİN DEĞİŞTİ · {analysis.target_date.isoformat()}",
+                f"Eski: {_fmt_c(previous_tmax)}"
+                + (f" → {previous_rounded}°C" if previous_rounded is not None else ""),
+                f"Yeni: {_fmt_c(analysis.final_tmax_c)}"
+                + (f" → {current_rounded}°C" if current_rounded is not None else "")
+                + delta_text,
+                (
+                    f"Güven: %{analysis.confidence_score} "
+                    f"· Aralık: {_fmt_range(analysis.main_range_low_c, analysis.main_range_high_c)}"
+                ),
+            ]
+        )
+
+    def market_resolve_alert(self, result: ActualResult) -> str:
+        return "\n".join(
+            [
+                f"ANKARA MARKET RESOLVE · {result.target_date.isoformat()}",
+                f"Final: {_fmt_c(result.tmax_c)} → {result.rounded_tmax_c}°C",
+                f"Kaynak: {result.source}",
+            ]
+        )
+
     def _metar_lines(self, metar: METARNormalized | None, *, include_raw: bool = True) -> list[str]:
         if metar is None:
             return [

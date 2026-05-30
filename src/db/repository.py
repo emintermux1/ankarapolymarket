@@ -28,6 +28,7 @@ from src.db.models import (
     MarketSnapshotRecord,
     ModelSnapshot,
     ModelWeight,
+    NotificationState,
     Observation,
     SourceStatus,
     TAF,
@@ -248,6 +249,22 @@ class Repository:
                 )
             )
         return result
+
+    def notification_state(self, key: str) -> dict[str, Any] | None:
+        with self.session_factory() as session:
+            row = session.get(NotificationState, key)
+            return row.payload if row else None
+
+    def save_notification_state(self, key: str, payload: dict[str, Any]) -> None:
+        with self.session_factory() as session:
+            row = session.get(NotificationState, key)
+            now = datetime.now(timezone.utc)
+            if row:
+                row.updated_at = now
+                row.payload = payload
+            else:
+                session.add(NotificationState(key=key, updated_at=now, payload=payload))
+            session.commit()
 
     def latest_model_weights(self, models: list[str]) -> dict[str, dict[str, float | None]]:
         weights: dict[str, dict[str, float | None]] = {}
