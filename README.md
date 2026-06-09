@@ -9,6 +9,7 @@ Ankara Esenboğa (LTAC) günlük maksimum sıcaklık tahmini, model karşılaşt
 - HavaForum Ankara thread scraper + günlük forum analizi
 - IEM ASOS LTAC geçmiş arşivi adapteri
 - Polymarket Gamma/CLOB/Data read-only reader
+- Ek kaynak paketi: MET Norway Locationforecast, Open-Meteo ECMWF HRES 9 km, Open-Meteo Previous Runs, NOAA ISD LTAC arşivi, RainViewer radar, EUMETSAT MSG Cloud Mask kataloğu, DWD ICON Open Data, NASA POWER ve OGIMET health/resource entegrasyonları
 - SQLAlchemy database modeli: observations, tafs, model_snapshots, forecast_runs, market_snapshots, daily_predictions, actual_results, source_status, backtest_scores, model_weights, analog_days
 - Forecast engine: weighted ensemble, bias correction hook, live METAR adjustment, LTAC microclimate placeholder, advection, basınç/üst seviye, üst seviye/profil, cloud/radiation, rain/soil, confidence
 - Telegram komutları: `/hourly`, `/today`, `/aviation` (`/ltac` alias), `/now`, `/metar`, `/metars`, `/taf`, `/models`, `/signals`, `/market`, `/edge`, `/backtest`, `/sources`, `/chart`, `/result`

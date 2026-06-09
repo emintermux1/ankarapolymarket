@@ -10,8 +10,13 @@ from src.data_sources.aviation_watch import AviationWatchAdapter, _noaa_snapshot
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
+from src.data_sources.met_no import MetNoAdapter
+from src.data_sources.noaa_isd import NOAAISDAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
+from src.data_sources.openmeteo_ecmwf import OpenMeteoECMWFAdapter
+from src.data_sources.openmeteo_previous_runs import OpenMeteoPreviousRunsAdapter
 from src.data_sources.openweather import OpenWeatherAdapter
+from src.data_sources.rainviewer import RainViewerAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
@@ -361,6 +366,120 @@ async def test_openmeteo_forecast_maps_cape_and_cin(monkeypatch) -> None:
     point = bundle.forecasts[0].hourly[0]
     assert point.cape_jkg == 850
     assert point.convective_inhibition_jkg == 125
+
+
+@pytest.mark.asyncio
+async def test_met_no_forecast_adds_keyless_locationforecast_model(monkeypatch) -> None:
+    adapter = MetNoAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["params"]["altitude"] == 953
+        return {
+            "properties": {
+                "timeseries": [
+                    {
+                        "time": "2026-05-24T09:00:00Z",
+                        "data": {
+                            "instant": {
+                                "details": {
+                                    "air_temperature": 21.5,
+                                    "relative_humidity": 42,
+                                    "cloud_area_fraction": 30,
+                                    "wind_speed": 4.0,
+                                    "wind_from_direction": 270,
+                                    "air_pressure_at_sea_level": 1014.2,
+                                }
+                            },
+                            "next_1_hours": {"details": {"precipitation_amount": 0.1}},
+                        },
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    forecast = await adapter.get_model_forecast(date(2026, 5, 24))
+
+    assert forecast.model == "met_no"
+    assert forecast.tmax_c == 21.5
+    assert forecast.hourly[0].wind_speed_10m_kt == 7.78
+
+
+@pytest.mark.asyncio
+async def test_openmeteo_ecmwf_hres_maps_hourly_tmax(monkeypatch) -> None:
+    adapter = OpenMeteoECMWFAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert url.endswith("/v1/ecmwf")
+        assert "temperature_2m_max" in kwargs["params"]["hourly"]
+        return {
+            "hourly": {
+                "time": ["2026-05-24T12:00", "2026-05-24T15:00"],
+                "temperature_2m": [22.0, 23.0],
+                "temperature_2m_max": [22.2, 24.1],
+                "cloud_cover": [30, 20],
+                "shortwave_radiation": [700, 620],
+            }
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    forecast = await adapter.get_model_forecast(date(2026, 5, 24))
+
+    assert forecast.model == "ecmwf_hres_9km"
+    assert forecast.tmax_c == 24.1
+    assert forecast.hourly[0].shortwave_radiation_wm2 == 700
+
+
+@pytest.mark.asyncio
+async def test_noaa_isd_daily_actual_parses_tenths_c(monkeypatch) -> None:
+    adapter = NOAAISDAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_fetch_year(year: int):
+        assert year == 2026
+        return [
+            {"DATE": "2026-05-24T09:00:00", "TMP": "+0210,1"},
+            {"DATE": "2026-05-24T12:00:00", "TMP": "+0240,1"},
+            {"DATE": "2026-05-25T12:00:00", "TMP": "+0300,1"},
+        ]
+
+    monkeypatch.setattr(adapter, "fetch_year", fake_fetch_year)
+
+    result = await adapter.get_daily_actual(date(2026, 5, 24))
+
+    assert result.source == "NOAA_ISD"
+    assert result.tmax_c == 24.0
+    assert result.rounded_tmax_c == 24
+
+
+@pytest.mark.asyncio
+async def test_openmeteo_previous_runs_collects_lead_time_values(monkeypatch) -> None:
+    adapter = OpenMeteoPreviousRunsAdapter(Settings(OPENMETEO_MODELS="icon_eu", TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert "temperature_2m_previous_day2" in kwargs["params"]["hourly"]
+        return {"hourly": {"temperature_2m_previous_day2_icon_eu": [20.0, None, 22.5]}}
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    values = await adapter.get_previous_day_temperatures(date(2026, 5, 24), lead_days=2)
+
+    assert values == [20.0, 22.5]
+
+
+@pytest.mark.asyncio
+async def test_rainviewer_latest_tile_url_uses_ltac_coordinates(monkeypatch) -> None:
+    adapter = RainViewerAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        return {"host": "https://tiles.example", "radar": {"past": [{"path": "/v2/radar/test"}]}}
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    tile_url = await adapter.latest_radar_tile_url()
+
+    assert tile_url == "https://tiles.example/v2/radar/test/512/7/40.1281/32.9951/2/1_1.png"
 
 
 @pytest.mark.asyncio

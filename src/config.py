@@ -332,6 +332,7 @@ class Settings(BaseSettings):
 
     mgm_station_id: str = Field(default="17130", alias="MGM_STATION_ID")
     mgm_observation_url: str = Field(default="https://servis.mgm.gov.tr/web/sondurumlar", alias="MGM_OBSERVATION_URL")
+    noaa_isd_station_file: str = Field(default="17128099999.csv", alias="NOAA_ISD_STATION_FILE")
     aqi_latitude: float = Field(default=39.9334, alias="AQI_LATITUDE")
     aqi_longitude: float = Field(default=32.8597, alias="AQI_LONGITUDE")
     twitter_ankara_accounts: Annotated[list[str], NoDecode] = Field(

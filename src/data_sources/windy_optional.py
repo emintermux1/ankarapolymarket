@@ -164,3 +164,11 @@ def _get_idx(lst: list[Any], idx: int) -> float | None:
         except (TypeError, ValueError):
             return None
     return None
+
+
+def unavailable_health() -> SourceHealth:
+    return SourceHealth(
+        source=WindyAdapter.source_name,
+        state=SourceState.UNAVAILABLE,
+        message="WINDY_API_KEY not configured",
+    )

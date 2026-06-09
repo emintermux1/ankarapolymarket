@@ -1289,6 +1289,8 @@ def _display_model_name(model: str) -> str:
         "icon_global": "ICON-Global",
         "visual_crossing": "Visual Crossing",
         "tomorrow_io": "Tomorrow.io",
+        "ecmwf_hres_9km": "ECMWF HRES 9 km",
+        "met_no": "MET Norway",
         "ecmwf": "ECMWF",
         "gfs": "GFS",
         "icon": "ICON",
