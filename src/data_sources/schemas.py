@@ -317,6 +317,43 @@ class ActualResult(BaseModel):
     manual_required: bool = False
 
 
+class AQISnapshot(BaseModel):
+    source: str = "OpenWeather"
+    fetch_timestamp: datetime
+    latitude: float
+    longitude: float
+    aqi_index: int = Field(ge=1, le=5)
+    pm25: float | None = None
+    pm10: float | None = None
+    o3: float | None = None
+    no2: float | None = None
+    so2: float | None = None
+    co: float | None = None
+    raw_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class UVSnapshot(BaseModel):
+    source: str = "Open-Meteo"
+    fetch_timestamp: datetime
+    uv_index_max: float
+    target_date: date
+    raw_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class MGMStationObservation(BaseModel):
+    source: str = "MGM"
+    fetch_timestamp: datetime
+    station_id: str
+    station_name: str
+    observation_time: datetime
+    temperature_c: float | None = None
+    relative_humidity: int | None = None
+    wind_direction_deg: int | None = None
+    wind_speed_kt: float | None = None
+    pressure_hpa: float | None = None
+    raw_json: dict[str, Any] = Field(default_factory=dict)
+
+
 def relative_humidity_from_temp_dewpoint(temp_c: float, dewpoint_c: float) -> int:
     numerator = exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
     denominator = exp((17.625 * temp_c) / (243.04 + temp_c))

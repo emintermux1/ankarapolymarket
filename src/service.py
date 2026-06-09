@@ -10,9 +10,9 @@ from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.aviation_watch import AviationWatchAdapter
 from src.data_sources.checkwx import CheckWXAdapter
 from src.data_sources.havaforum import HavaForumScraper
-from src.data_sources.herbie_optional import unavailable_health as herbie_unavailable_health
+from src.data_sources.herbie_optional import HerbieAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
-from src.data_sources.mgm_optional import unavailable_health as mgm_unavailable_health
+from src.data_sources.mgm import MGMAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
@@ -68,6 +68,8 @@ class ForecastService:
         self.iem = IEMASOSAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
         self.havaforum = HavaForumScraper(settings)
+        self.mgm = MGMAdapter(settings)
+        self.herbie = HerbieAdapter(settings)
         self.engine = LTACForecastEngine(settings)
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
@@ -305,7 +307,7 @@ class ForecastService:
             self.havaforum.health(),
             self.aviation_watch.health(),
         )
-        optional_health = [mgm_unavailable_health(), herbie_unavailable_health()]
+        optional_health = [await self.mgm.health(), await self.herbie.health()]
         for item in [*health, *optional_health]:
             self.repository.save_source_health(item)
         return [*health, *optional_health]
