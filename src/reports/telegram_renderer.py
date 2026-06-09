@@ -928,6 +928,63 @@ class TelegramReportRenderer:
         local = datetime.now(self.tz)
         return f"Ankara radar görüntüsü - {local:%Y-%m-%d %H:%M} ({self.settings.report_timezone}) | Canlı radar: {self.settings.radar_motion_url}"
 
+    def pirep_report(self, pireps: list[dict], station: str) -> str:
+        if not pireps:
+            return f"✈️ {station}: Yakın bölgede PIREP raporu yok"
+        lines = [f"✈️ {station} Yakın PIREP Raporları:"]
+        for p in pireps[:5]:
+            dist = f"{p.get('distance_km', '?')}km" if p.get('distance_km') else "?"
+            alt = f"FL{int(p['altitude_ft']/100)}" if p.get('altitude_ft') else "?"
+            turb = f" türb:{p['turbulence']}" if p.get('turbulence') else ""
+            ice = f" buzlanma:{p['icing']}" if p.get('icing') else ""
+            temp = f" {p['temperature_c']}°C" if p.get('temperature_c') else ""
+            wind = f" rüzgar:{p.get('wind_dir_deg','?')}°/{p.get('wind_speed_kt','?')}kt" if p.get('wind_speed_kt') else ""
+            raw = p.get('raw_text', '')[:120]
+            lines.append(f"  {dist} {alt}{temp}{wind}{turb}{ice}")
+            if raw:
+                lines.append(f"    {raw}")
+        return "\n".join(lines)
+
+    def flight_report(self, flights: list[dict], station: str) -> str:
+        if not flights:
+            return f"🛫 {station}: Yakında uçuş tespit edilmedi"
+        lines = [f"🛫 {station} Yakın Uçuşlar ({len(flights)} adet):"]
+        for f in flights[:8]:
+            cs = f.get('callsign') or 'N/A'
+            alt = f"{int(f['baro_altitude_m'])}m" if f.get('baro_altitude_m') else "yerde"
+            spd = f" {int(f.get('velocity_m_s', 0) * 1.94384)}kt" if f.get('velocity_m_s') else ""
+            hdg = f" {int(f['heading_deg'])}°" if f.get('heading_deg') else ""
+            on_ground = " 🅿️" if f.get('on_ground') else ""
+            lines.append(f"  {cs}: {alt}{spd}{hdg}{on_ground}")
+        return "\n".join(lines)
+
+    def aviation_enrichment(
+        self,
+        metars: list,
+        pireps_text: str,
+        flights_text: str,
+        radar_url: str,
+        satellite_url: str,
+        sigwx_url: str,
+    ) -> str:
+        """Combined aviation enrichment digest for LTAC/LTFM."""
+        local = datetime.now(self.tz)
+        lines = [f"✈️ Havacılık Zenginleştirme - {local:%Y-%m-%d %H:%M}"]
+        if metars:
+            lines.append("\n📡 METAR Kaynak Karşılaştırması:")
+            for m in metars:
+                src = m.source
+                lines.append(f"  {src}: {m.temperature_c:.1f}°C / {m.dew_point_c:.1f}°C / rüzgar {m.wind_direction_deg or 'VRB'}° {m.wind_speed_kt:.0f}kt / Q{m.pressure_hpa:.0f}" if m.pressure_hpa else f"  {src}: {m.temperature_c:.1f}°C / {m.dew_point_c:.1f}°C")
+        if pireps_text:
+            lines.append(f"\n{pireps_text}")
+        if flights_text:
+            lines.append(f"\n{flights_text}")
+        lines.append(f"\n🗺️ Görseller:")
+        lines.append(f"  Radar: {radar_url}")
+        lines.append(f"  Uydu: {satellite_url}")
+        lines.append(f"  SIGWX Chart: {sigwx_url}")
+        return "\n".join(lines)
+
     def _data_quality_lines(
         self,
         target_date: date,

@@ -45,6 +45,10 @@ from src.data_sources.weatherbit import WeatherbitAdapter
 from src.data_sources.weatherapi_optional import unavailable_health as weatherapi_unavailable_health
 from src.data_sources.windy_optional import unavailable_health as windy_unavailable_health
 from src.data_sources.wunderground import WundergroundScraper
+from src.data_sources.avwx import AVWXAdapter
+from src.data_sources.noaa_aviation import NOAAAviationAdapter
+from src.data_sources.opensky import OpenSkyAdapter
+from src.data_sources.windy_aviation import WindyAviationAdapter
 from src.data_sources.xweather import XWeatherAdapter
 from src.db.repository import Repository, manual_actual_result
 from src.forecast.engine import LTACForecastEngine
@@ -87,7 +91,6 @@ class ForecastService:
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
         self.aviation_watch = AviationWatchAdapter(settings)
-        self.mgm = MGMAdapter(settings)
         self.aqi = AQIAdapter(settings)
         self.copernicus = CopernicusAdapter(settings)
         self.stormglass = StormglassAdapter(settings)
@@ -97,6 +100,10 @@ class ForecastService:
         self.aski = ASKIBarajAdapter(settings)
         self.tedas = TEDASAdapter(settings)
         self.twitter = TwitterXAdapter(settings)
+        self.avwx = AVWXAdapter(settings)
+        self.opensky = OpenSkyAdapter(settings)
+        self.noaa_aviation = NOAAAviationAdapter(settings)
+        self.windy_aviation = WindyAviationAdapter(settings)
 
     def default_target_date(self) -> date:
         return datetime.now(ZoneInfo(self.settings.report_timezone)).date()
@@ -415,6 +422,10 @@ class ForecastService:
             self.copernicus.health(),
             self.stormglass.health(),
             self.xweather.health(),
+            self.avwx.health(),
+            self.opensky.health(),
+            self.noaa_aviation.health(),
+            self.windy_aviation.health(),
         )
         optional_health = [
             await self.mgm.health(),
@@ -568,6 +579,58 @@ class ForecastService:
             return await self.iem.fetch_history(start_at, end_at)
         except Exception:
             return []
+
+    # ---- Aviation enrichment methods ----
+
+    async def render_aviation_enrichment(self, station: str = "LTAC") -> str:
+        """Combined aviation enrichment: METAR alt sources + PIREPs + flights."""
+        return await self.renderer.aviation_enrichment(
+            await self._fetch_aviation_metars(station),
+            await self.render_pireps(station),
+            await self.render_flights(station),
+            self.windy_aviation.radar_url_ltac(),
+            self.windy_aviation.satellite_url_ltac(),
+            self.noaa_aviation.sigwx_url(),
+        )
+
+    async def render_pireps(self, station: str = "LTAC") -> str:
+        try:
+            if station.upper() == "LTFM":
+                pireps = await self.noaa_aviation.get_pireps_near_ltfm()
+            else:
+                pireps = await self.noaa_aviation.get_pireps_near_ltac()
+            return self.renderer.pirep_report(pireps, station)
+        except Exception:
+            return ""
+
+    async def render_flights(self, station: str = "LTAC") -> str:
+        try:
+            if station.upper() == "LTFM":
+                flights = await self.opensky.get_flights_near_ltfm()
+            else:
+                flights = await self.opensky.get_flights_near_ltac()
+            return self.renderer.flight_report(flights, station)
+        except Exception:
+            return ""
+
+    async def _fetch_aviation_metars(self, station: str) -> list[METARNormalized]:
+        """Fetch METAR from all available sources for cross-reference."""
+        station_id = station.strip().upper()
+        metars = []
+        for fetcher in [self._safe_metar, self._safe_avwx_metar]:
+            try:
+                metar = await fetcher(station)
+                if metar:
+                    metars.append(metar)
+            except Exception:
+                continue
+        return metars
+
+    async def _safe_avwx_metar(self, station: str | None = None) -> METARNormalized | None:
+        try:
+            return await self.avwx.get_metar(station)
+        except Exception:
+            return None
 
     async def _safe_baraj_snapshot(self) -> BarajSnapshot | None:
         try:

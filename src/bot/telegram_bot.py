@@ -46,6 +46,7 @@ def build_application(settings: Settings, service: ForecastService) -> Applicati
     application.add_handler(CommandHandler("outage", commands.outage))
     application.add_handler(CommandHandler("kesinti", commands.kesinti))
     application.add_handler(CommandHandler("twitter", commands.twitter_cmd))
+    application.add_handler(CommandHandler("avwx", commands.avwx_cmd))
     application.add_error_handler(commands.error_handler)
     scheduler = build_scheduler(application, service, settings)
     application.bot_data["scheduler"] = scheduler
