@@ -6,9 +6,12 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from src.config import Settings
+from src.data_sources.aqi import AQIAdapter
+from src.data_sources.aski_baraj import ASKIBarajAdapter
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.aviation_watch import AviationWatchAdapter
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.copernicus import CopernicusAdapter
 from src.data_sources.havaforum import HavaForumScraper
 from src.data_sources.herbie_optional import HerbieAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
@@ -16,9 +19,11 @@ from src.data_sources.mgm import MGMAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
+from src.data_sources.radar_satellite import RadarSatelliteAdapter
 from src.data_sources.schemas import (
     ActualResult,
     AviationSourceSnapshot,
+    BarajSnapshot,
     ForecastAnalysis,
     ForumAnalysis,
     MarketSnapshot,
@@ -28,11 +33,19 @@ from src.data_sources.schemas import (
     NearbySensorSnapshot,
     SourceHealth,
     TAFNormalized,
+    TwitterPost,
 )
+from src.data_sources.stormglass import StormglassAdapter
+from src.data_sources.tedas import TEDASAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
+from src.data_sources.twitter_x import TwitterXAdapter
+from src.data_sources.uv_index import UVIndexAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
+from src.data_sources.weatherapi_optional import unavailable_health as weatherapi_unavailable_health
+from src.data_sources.windy_optional import unavailable_health as windy_unavailable_health
 from src.data_sources.wunderground import WundergroundScraper
+from src.data_sources.xweather import XWeatherAdapter
 from src.db.repository import Repository, manual_actual_result
 from src.forecast.engine import LTACForecastEngine
 from src.reports.charts import ChartRenderer
@@ -74,6 +87,16 @@ class ForecastService:
         self.renderer = TelegramReportRenderer(settings)
         self.charts = ChartRenderer(settings)
         self.aviation_watch = AviationWatchAdapter(settings)
+        self.mgm = MGMAdapter(settings)
+        self.aqi = AQIAdapter(settings)
+        self.copernicus = CopernicusAdapter(settings)
+        self.stormglass = StormglassAdapter(settings)
+        self.xweather = XWeatherAdapter(settings)
+        self.uv_index = UVIndexAdapter(settings)
+        self.radar = RadarSatelliteAdapter(settings)
+        self.aski = ASKIBarajAdapter(settings)
+        self.tedas = TEDASAdapter(settings)
+        self.twitter = TwitterXAdapter(settings)
 
     def default_target_date(self) -> date:
         return datetime.now(ZoneInfo(self.settings.report_timezone)).date()
@@ -252,6 +275,82 @@ class ForecastService:
     def render_backtest(self) -> str:
         return self.renderer.backtest_report(self.repository.latest_backtest_summary())
 
+    # ---- Turkish infrastructure data methods ----
+
+    async def render_mgm(self) -> str:
+        try:
+            obs = await self.mgm.get_ankara_observation()
+            return self.renderer.mgm_observation(obs)
+        except Exception as exc:
+            return f"MGM verisi alınamadı: {exc}"
+
+    async def render_aqi(self) -> str:
+        try:
+            data = await self.aqi.get_aqi()
+            return self.renderer.aqi_report(data)
+        except Exception as exc:
+            return f"Hava kalitesi verisi alınamadı: {exc}"
+
+    async def render_uv(self) -> str:
+        try:
+            data = await self.uv_index.get_uv()
+            return self.renderer.uv_report(data)
+        except Exception as exc:
+            return f"UV indeks verisi alınamadı: {exc}"
+
+    async def render_baraj(self) -> str:
+        try:
+            snapshot = await self.aski.get_snapshot()
+            return self.renderer.baraj_report(snapshot)
+        except Exception as exc:
+            return f"Baraj doluluk verisi alınamadı: {exc}"
+
+    async def render_outages(self) -> str:
+        try:
+            outages = await self.tedas.get_outage_snapshots()
+            return self.renderer.outage_report(outages)
+        except Exception as exc:
+            return f"Elektrik kesinti verisi alınamadı: {exc}"
+
+    async def render_twitter(self) -> str:
+        try:
+            posts = await self.twitter.get_twitter_snapshots(limit=5)
+            return self.renderer.twitter_report(posts)
+        except Exception as exc:
+            return f"Twitter verisi alınamadı: {exc}"
+
+    async def render_radar(self) -> tuple[str, str]:
+        try:
+            result = await self.radar.get_radar_image()
+            if result:
+                return result
+            return self.renderer.radar_caption(), ""
+        except Exception:
+            return self.renderer.radar_caption(), ""
+
+    async def render_environment_digest(self) -> str:
+        mgm_text: str = "MGM: veri yok"
+        aqi_text: str = "AQI: veri yok"
+        uv_text: str = "UV: veri yok"
+        baraj_text: str = "Baraj: veri yok"
+        try:
+            mgm_text = await self.render_mgm()
+        except Exception:
+            pass
+        try:
+            aqi_text = await self.render_aqi()
+        except Exception:
+            pass
+        try:
+            uv_text = await self.render_uv()
+        except Exception:
+            pass
+        try:
+            baraj_text = await self.render_baraj()
+        except Exception:
+            pass
+        return self.renderer.environment_digest(mgm_text, aqi_text, uv_text, baraj_text)
+
     async def render_sources(self) -> str:
         health = await self.check_sources()
         return self.renderer.sources_report(health)
@@ -306,8 +405,23 @@ class ForecastService:
             self.wunderground.health(),
             self.havaforum.health(),
             self.aviation_watch.health(),
+            self.mgm.health(),
+            self.aqi.health(),
+            self.aski.health(),
+            self.tedas.health(),
+            self.twitter.health(),
+            self.uv_index.health(),
+            self.radar.health(),
+            self.copernicus.health(),
+            self.stormglass.health(),
+            self.xweather.health(),
         )
-        optional_health = [await self.mgm.health(), await self.herbie.health()]
+        optional_health = [
+            await self.mgm.health(),
+            await self.herbie.health(),
+            windy_unavailable_health(),
+            weatherapi_unavailable_health(),
+        ]
         for item in [*health, *optional_health]:
             self.repository.save_source_health(item)
         return [*health, *optional_health]
@@ -331,14 +445,16 @@ class ForecastService:
                 return None
 
     async def _safe_models(self, target_date: date) -> ModelBundle | None:
-        bundle, visual, tomorrow, openweather, weatherbit = await asyncio.gather(
+        bundle, visual, tomorrow, openweather, weatherbit, stormglass, xweather = await asyncio.gather(
             self._safe_openmeteo_models(target_date),
             self._safe_visualcrossing_model(target_date),
             self._safe_tomorrow_model(target_date),
             self._safe_openweather_model(target_date),
             self._safe_weatherbit_model(target_date),
+            self._safe_stormglass_model(target_date),
+            self._safe_xweather_model(target_date),
         )
-        extras = [forecast for forecast in (visual, tomorrow, openweather, weatherbit) if forecast is not None]
+        extras = [forecast for forecast in (visual, tomorrow, openweather, weatherbit, stormglass, xweather) if forecast is not None]
         if bundle is None and extras:
             bundle = ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target_date, source="Mixed")
         if bundle is not None:
@@ -380,6 +496,22 @@ class ForecastService:
             return None
         try:
             return await self.weatherbit.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_stormglass_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.stormglass_api_key:
+            return None
+        try:
+            return await self.stormglass.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_xweather_model(self, target_date: date) -> ModelForecast | None:
+        if not self.settings.xweather_client_id:
+            return None
+        try:
+            return await self.xweather.get_model_forecast(target_date)
         except Exception:
             return None
 
@@ -436,6 +568,18 @@ class ForecastService:
             return await self.iem.fetch_history(start_at, end_at)
         except Exception:
             return []
+
+    async def _safe_baraj_snapshot(self) -> BarajSnapshot | None:
+        try:
+            return await self.aski.get_snapshot()
+        except Exception:
+            return None
+
+    async def _safe_aqi_data(self) -> dict | None:
+        try:
+            return await self.aqi.get_aqi()
+        except Exception:
+            return None
 
 
 async def _none() -> None:

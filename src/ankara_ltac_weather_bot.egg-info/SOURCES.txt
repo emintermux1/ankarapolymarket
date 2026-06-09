@@ -15,6 +15,7 @@ src/bot/scheduler.py
 src/bot/telegram_bot.py
 src/data_sources/__init__.py
 src/data_sources/aqi.py
+src/data_sources/aski_baraj.py
 src/data_sources/aviation_watch.py
 src/data_sources/aviationweather.py
 src/data_sources/base.py
@@ -34,7 +35,9 @@ src/data_sources/polymarket.py
 src/data_sources/radar_satellite.py
 src/data_sources/schemas.py
 src/data_sources/stormglass.py
+src/data_sources/tedas.py
 src/data_sources/tomorrow.py
+src/data_sources/twitter_x.py
 src/data_sources/uv_index.py
 src/data_sources/visualcrossing.py
 src/data_sources/weatherapi_optional.py

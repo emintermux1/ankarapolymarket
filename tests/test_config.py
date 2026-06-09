@@ -128,7 +128,7 @@ async def test_scheduler_starts_inside_running_loop(tmp_path) -> None:
     scheduler = application.bot_data["scheduler"]
 
     job_ids = {job.id for job in scheduler.get_jobs()}
-    assert job_ids == {"ltac_hourly_max_forecast", "metar_sensor_alerts", "aviation_source_watch"}
+    assert job_ids == {"ltac_hourly_max_forecast", "metar_sensor_alerts", "aviation_source_watch", "turkish_scraper_bundle"}
 
     await _start_scheduler(application)
     assert scheduler.running
@@ -156,4 +156,5 @@ def test_scheduler_legacy_mode_disables_hourly_job(tmp_path) -> None:
         "ltac_daily_forecast",
         "ltac_market_resolve",
         "metar_sensor_alerts",
+        "turkish_scraper_bundle",
     }

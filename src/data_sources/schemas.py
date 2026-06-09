@@ -360,5 +360,35 @@ def relative_humidity_from_temp_dewpoint(temp_c: float, dewpoint_c: float) -> in
     return int(round(max(0.0, min(100.0, 100.0 * numerator / denominator))))
 
 
+class BarajSnapshot(BaseModel):
+    source: str = "ASKİ"
+    fetch_timestamp: datetime
+    total_fill_pct: float | None = None
+    daily_change_pct: float | None = None
+    dams: list[dict[str, Any]] = Field(default_factory=list)
+    last_updated: datetime | None = None
+    raw_text: str | None = None
+
+
+class PowerOutage(BaseModel):
+    source: str = "TEDAŞ"
+    fetch_timestamp: datetime
+    district: str
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    reason: str | None = None
+    affected_areas: list[str] = Field(default_factory=list)
+
+
+class TwitterPost(BaseModel):
+    source: str = "Twitter/X"
+    fetch_timestamp: datetime
+    post_id: str
+    author: str
+    text: str
+    published_at: datetime
+    url: str
+
+
 def round_market_temperature_c(value: float) -> int:
     return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
