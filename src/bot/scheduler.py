@@ -515,8 +515,21 @@ async def _send_twitter_posts(application: Application, service: ForecastService
         return
     try:
         posts = await service.twitter.get_twitter_snapshots(limit=3)
-        if posts:
-            text = service.renderer.twitter_report(posts)
+        new_posts = []
+        for post in posts:
+            key = f"telegram:twitter-post:{post.post_id}"
+            if not service.repository.telegram_delivery_exists(key):
+                new_posts.append(post)
+                service.repository.save_telegram_delivery(
+                    key=key,
+                    chat_id=str(chat_id),
+                    kind="twitter_post",
+                    target_date=datetime.now(timezone.utc).date(),
+                    scheduled_for=datetime.now(timezone.utc),
+                    payload={"post_id": post.post_id, "author": post.author, "sent_at": datetime.now(timezone.utc).isoformat()},
+                )
+        if new_posts:
+            text = service.renderer.twitter_report(new_posts)
             await _send_long(application, chat_id, text)
     except Exception as exc:
         logger.warning("Twitter posts failed: %s", exc)
@@ -528,8 +541,21 @@ async def _send_power_outage_alerts(application: Application, service: ForecastS
         return
     try:
         outages = await service.tedas.get_outage_snapshots()
-        if outages:
-            text = service.renderer.outage_report(outages)
+        new_outages = []
+        for outage in outages:
+            key = f"telegram:power-outage:{outage.district}:{outage.start_time.isoformat() if outage.start_time else 'unknown'}"
+            if not service.repository.telegram_delivery_exists(key):
+                new_outages.append(outage)
+                service.repository.save_telegram_delivery(
+                    key=key,
+                    chat_id=str(chat_id),
+                    kind="power_outage",
+                    target_date=datetime.now(timezone.utc).date(),
+                    scheduled_for=datetime.now(timezone.utc),
+                    payload={"district": outage.district, "reason": outage.reason, "sent_at": datetime.now(timezone.utc).isoformat()},
+                )
+        if new_outages:
+            text = service.renderer.outage_report(new_outages)
             await _send_long(application, chat_id, text)
     except Exception as exc:
         logger.warning("Power outage alert failed: %s", exc)

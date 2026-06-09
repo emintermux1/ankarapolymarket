@@ -148,6 +148,15 @@ class WindyAdapter(HttpSource):
             return SourceHealth(source=self.source_name, state=SourceState.DOWN, message=str(exc))
 
 
+def unavailable_health() -> SourceHealth:
+    """Backward-compatible unavailable health for service.check_sources()."""
+    return SourceHealth(
+        source="Windy",
+        state=SourceState.UNAVAILABLE,
+        message="WINDY_API_KEY not configured",
+    )
+
+
 def _get_idx(lst: list[Any], idx: int) -> float | None:
     if idx < len(lst) and lst[idx] is not None:
         try:

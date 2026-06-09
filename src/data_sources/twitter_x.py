@@ -63,28 +63,33 @@ class TwitterXAdapter(HttpSource):
 def _parse_nitter_posts(html: str, account: str, limit: int = 5) -> list[dict[str, Any]]:
     """Parse posts from Nitter HTML."""
     posts: list[dict[str, Any]] = []
-    # Match tweet-content divs
-    tweet_blocks = re.findall(
-        r'<div\s+class="tweet-content[^"]*"[^>]*>(.*?)</div>\s*</div>\s*<div\s+class="tweet-footer',
+    # Match full tweet containers (tweet-body div) to capture content, date, and permalink together
+    tweet_containers = re.findall(
+        r'<div\s+class="tweet-body[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>\s*</div>',
         html,
         flags=re.DOTALL | re.IGNORECASE,
     )
-    # Alternative pattern
-    if not tweet_blocks:
-        tweet_blocks = re.findall(
+    if not tweet_containers:
+        tweet_containers = re.findall(
             r'<div\s+class="tweet-content[^"]*"[^>]*>(.*?)</div>',
             html,
             flags=re.DOTALL | re.IGNORECASE,
         )
 
-    for i, block in enumerate(tweet_blocks[:limit]):
-        text = _clean_tweet_text(block)
+    for i, container in enumerate(tweet_containers[:limit]):
+        # Extract text from tweet-content within the full container
+        content_match = re.search(
+            r'<div\s+class="tweet-content[^"]*"[^>]*>(.*?)</div>',
+            container,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        text = _clean_tweet_text(content_match.group(1)) if content_match else _clean_tweet_text(container)
         if not text or len(text) < 5:
             continue
-        # Try to extract timestamp
+        # Try to extract timestamp from full container context
         timestamp_match = re.search(
             r'<span\s+class="tweet-date"[^>]*>.*?<a[^>]*title="([^"]+)"',
-            block,
+            container,
         )
         ts = None
         if timestamp_match:
@@ -93,8 +98,8 @@ def _parse_nitter_posts(html: str, account: str, limit: int = 5) -> list[dict[st
             except ValueError:
                 ts = None
 
-        # Try to extract permalink
-        url_match = re.search(r'<a[^>]*href="(/[^/]+/status/\d+[^"]*)"', block)
+        # Try to extract permalink from full container context
+        url_match = re.search(r'<a[^>]*href="(/[^/]+/status/\d+[^"]*)"', container)
         url = f"https://nitter.net{url_match.group(1)}" if url_match else f"https://nitter.net/{account}"
 
         post_id_match = re.search(r"/status/(\d+)", url)
