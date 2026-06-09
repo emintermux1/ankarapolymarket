@@ -29,6 +29,9 @@ class ASKIBarajAdapter(HttpSource):
         if dams:
             fills = [v for v in dams.values() if v is not None]
             if fills:
+                # Simple arithmetic mean of per-dam percentages.
+                # A true capacity-weighted total requires per-dam volume data
+                # which ASKİ does not consistently expose in the same HTML table.
                 total_pct = round(sum(fills) / len(fills), 1)
         last_updated = _parse_last_updated(html)
         return {
@@ -81,20 +84,20 @@ def _parse_baraj_table(html: str) -> dict[str, float | None]:
         r"(%\s*)?(\d{1,3})[\.,](\d{0,2})\s*%?",
     )
 
-    # Try to match dam names near percentages
+    # Match dam name followed by an explicit percentage token within 200 chars.
+    # Uses \b to avoid partial word matches and requires a trailing % to avoid
+    # misreading volume/capacity numbers as fill percentages.
     for dam in _ANKARA_DAMS:
-        # Look for dam name followed by percentage within 200 chars
         pattern = re.compile(
-            re.escape(dam) + r".{0,200}?" + r"(%?\s*)(\d{1,3})[\.,](\d{0,2})\s*%?",
+            r"\b" + re.escape(dam) + r"\b.{0,200}?(\d{1,3})[\.,](\d{1,2})\s*%",
             flags=re.IGNORECASE | re.DOTALL,
         )
         match = pattern.search(html)
         if match:
             try:
-                integer_part = int(match.group(2))
-                decimal_part = match.group(3)
+                integer_part = int(match.group(1))
+                decimal_part = match.group(2)
                 value = float(f"{integer_part}.{decimal_part}") if decimal_part else float(integer_part)
-                # Validate reasonable range
                 if 0 <= value <= 100:
                     dams[dam] = value
             except (ValueError, IndexError):

@@ -164,3 +164,12 @@ def _kmh_to_kt(value: Any) -> float | None:
     if raw is None:
         return None
     return raw * 0.539957
+
+
+def unavailable_health() -> SourceHealth:
+    """Backward-compatible unavailable health for service.check_sources()."""
+    return SourceHealth(
+        source="WeatherAPI",
+        state=SourceState.UNAVAILABLE,
+        message="WEATHERAPI_API_KEY not configured",
+    )

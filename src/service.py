@@ -324,9 +324,9 @@ class ForecastService:
             result = await self.radar.get_radar_image()
             if result:
                 return result
-            return self.renderer.radar_caption(), ""
+            return "", self.renderer.radar_caption()
         except Exception:
-            return self.renderer.radar_caption(), ""
+            return "", self.renderer.radar_caption()
 
     async def render_environment_digest(self) -> str:
         mgm_text: str = "MGM: veri yok"
