@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from src.data_sources.schemas import SourceHealth, SourceState
+from src.data_sources.mgm import MGMAdapter
 
-
-def unavailable_health() -> SourceHealth:
-    return SourceHealth(source="MGM_Optional", state=SourceState.UNAVAILABLE, message="MGM integration not enabled in MVP")
-
+__all__ = ["MGMAdapter"]
