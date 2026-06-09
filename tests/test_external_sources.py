@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,9 +10,11 @@ from src.data_sources.base import SourceError
 from src.data_sources.aviation_watch import AviationWatchAdapter, _noaa_snapshot, _noaa_taf_snapshot
 from src.data_sources.aviationweather import AviationWeatherAdapter
 from src.data_sources.checkwx import CheckWXAdapter
+from src.data_sources.copernicus import CopernicusAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
 from src.data_sources.met_no import MetNoAdapter
 from src.data_sources.noaa_isd import NOAAISDAdapter
+from src.data_sources.noaa_aviation import NOAAAviationAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
 from src.data_sources.openmeteo_ecmwf import OpenMeteoECMWFAdapter
 from src.data_sources.openmeteo_previous_runs import OpenMeteoPreviousRunsAdapter
@@ -22,6 +25,7 @@ from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.weatherapi_optional import WeatherAPIAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
 from src.data_sources.windy_optional import WindyAdapter
+from src.service import ForecastService
 
 
 @pytest.mark.asyncio
@@ -487,6 +491,75 @@ async def test_rainviewer_latest_tile_url_uses_ltac_coordinates(monkeypatch) -> 
     tile_url = await adapter.latest_radar_tile_url()
 
     assert tile_url == "https://tiles.example/v2/radar/test/512/7/40.1281/32.9951/2/1_1.png"
+
+
+@pytest.mark.asyncio
+async def test_noaa_pirep_radius_uses_kilometers_to_nautical_miles(monkeypatch) -> None:
+    adapter = NOAAAviationAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["params"]["area"] == "108nm"
+        return []
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    assert await adapter.get_pireps_near_ltac(radius_km=200.0) == []
+
+
+@pytest.mark.asyncio
+async def test_copernicus_submit_keeps_dates_as_date_objects(monkeypatch) -> None:
+    adapter = CopernicusAdapter(Settings(COPERNICUS_CDS_API_KEY="test-key", TELEGRAM_ADMIN_IDS=""))
+    captured_payload = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": []}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url: str, **kwargs):
+            captured_payload.update(kwargs["json"])
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+
+    await adapter._retrieve_via_submit(date(2026, 5, 24), date(2026, 5, 25))
+
+    assert captured_payload["day"] == ["24", "25"]
+
+
+@pytest.mark.asyncio
+async def test_aviation_enrichment_renderer_is_not_awaited() -> None:
+    service = ForecastService.__new__(ForecastService)
+
+    async def fake_metars(station):
+        return ["metar"]
+
+    async def fake_pireps(station):
+        return "pireps"
+
+    async def fake_flights(station):
+        return "flights"
+
+    service._fetch_aviation_metars = fake_metars
+    service.render_pireps = fake_pireps
+    service.render_flights = fake_flights
+    service.windy_aviation = SimpleNamespace(radar_url_ltac=lambda: "radar", satellite_url_ltac=lambda: "satellite")
+    service.noaa_aviation = SimpleNamespace(sigwx_url=lambda: "sigwx")
+    service.renderer = SimpleNamespace(aviation_enrichment=lambda *args: "rendered")
+
+    assert await service.render_aviation_enrichment("LTAC") == "rendered"
 
 
 @pytest.mark.asyncio

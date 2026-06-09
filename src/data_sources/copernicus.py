@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from src.config import Settings
@@ -69,13 +69,9 @@ class CopernicusAdapter(HttpSource):
         dates = []
         current = start_date
         while current <= end_date:
-            dates.append(current.isoformat())
-            day = current.day + 1
-            month = current.month
-            year = current.year
+            dates.append(current)
             try:
-                from datetime import timedelta
-                current = (current + timedelta(days=1))
+                current = current + timedelta(days=1)
             except OverflowError:
                 break
 

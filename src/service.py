@@ -636,7 +636,7 @@ class ForecastService:
 
     async def render_aviation_enrichment(self, station: str = "LTAC") -> str:
         """Combined aviation enrichment: METAR alt sources + PIREPs + flights."""
-        return await self.renderer.aviation_enrichment(
+        return self.renderer.aviation_enrichment(
             await self._fetch_aviation_metars(station),
             await self.render_pireps(station),
             await self.render_flights(station),

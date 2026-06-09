@@ -39,7 +39,7 @@ class NOAAAviationAdapter(HttpSource):
         try:
             payload = await self._request_json(
                 _NOAA_PIREP_URL,
-                params={"format": "json", "area": f"{radius_km / 1852:.0f}nm"},
+                params={"format": "json", "area": f"{radius_km / 1.852:.0f}nm"},
             )
         except Exception:
             return []
