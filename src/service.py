@@ -48,8 +48,8 @@ from src.data_sources.twitter_x import TwitterXAdapter
 from src.data_sources.uv_index import UVIndexAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
-from src.data_sources.weatherapi_optional import unavailable_health as weatherapi_unavailable_health
-from src.data_sources.windy_optional import unavailable_health as windy_unavailable_health
+from src.data_sources.weatherapi_optional import WeatherAPIAdapter
+from src.data_sources.windy_optional import WindyAdapter
 from src.data_sources.wunderground import WundergroundScraper
 from src.data_sources.avwx import AVWXAdapter
 from src.data_sources.noaa_aviation import NOAAAviationAdapter
@@ -464,8 +464,8 @@ class ForecastService:
         optional_health = [
             await self.mgm.health(),
             await self.herbie.health(),
-            windy_unavailable_health(),
-            weatherapi_unavailable_health(),
+            await WindyAdapter(self.settings).health(),
+            await WeatherAPIAdapter(self.settings).health(),
         ]
         for item in [*health, *optional_health]:
             self.repository.save_source_health(item)

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from io import StringIO
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -24,7 +25,18 @@ class NOAAISDAdapter(HttpSource):
         return list(csv.DictReader(StringIO(payload)))
 
     async def get_daily_actual(self, target_date: date) -> ActualResult:
-        rows = [row for row in await self.fetch_year(target_date.year) if str(row.get("DATE", "")).startswith(target_date.isoformat())]
+        tz = ZoneInfo(self.settings.report_timezone)
+        start_utc = datetime.combine(target_date, time.min, tzinfo=tz).astimezone(timezone.utc)
+        end_utc = datetime.combine(target_date, time.max, tzinfo=tz).astimezone(timezone.utc)
+        years = range(start_utc.year, end_utc.year + 1)
+        fetched_rows = []
+        for year in years:
+            fetched_rows.extend(await self.fetch_year(year))
+        rows = []
+        for row in fetched_rows:
+            observed_at = _parse_isd_datetime(row.get("DATE"))
+            if observed_at is not None and start_utc <= observed_at <= end_utc:
+                rows.append(row)
         values = []
         for row in rows:
             temp = _parse_isd_temperature(row.get("TMP"))
@@ -84,3 +96,15 @@ def _parse_isd_temperature(value: Any) -> float | None:
     if abs(integer) >= 9999:
         return None
     return integer / 10.0
+
+
+def _parse_isd_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

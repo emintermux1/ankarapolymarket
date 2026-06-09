@@ -19,7 +19,9 @@ from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.rainviewer import RainViewerAdapter
 from src.data_sources.tomorrow import TomorrowIOAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
+from src.data_sources.weatherapi_optional import WeatherAPIAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
+from src.data_sources.windy_optional import WindyAdapter
 
 
 @pytest.mark.asyncio
@@ -433,24 +435,29 @@ async def test_openmeteo_ecmwf_hres_maps_hourly_tmax(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_noaa_isd_daily_actual_parses_tenths_c(monkeypatch) -> None:
+async def test_noaa_isd_daily_actual_uses_report_timezone_day(monkeypatch) -> None:
     adapter = NOAAISDAdapter(Settings(TELEGRAM_ADMIN_IDS=""))
+    fetched_years = []
 
     async def fake_fetch_year(year: int):
-        assert year == 2026
-        return [
-            {"DATE": "2026-05-24T09:00:00", "TMP": "+0210,1"},
-            {"DATE": "2026-05-24T12:00:00", "TMP": "+0240,1"},
-            {"DATE": "2026-05-25T12:00:00", "TMP": "+0300,1"},
-        ]
+        fetched_years.append(year)
+        if year == 2025:
+            return [{"DATE": "2025-12-31T22:30:00", "TMP": "+0260,1"}]
+        if year == 2026:
+            return [
+                {"DATE": "2026-01-01T12:00:00", "TMP": "+0240,1"},
+                {"DATE": "2026-01-01T21:30:00", "TMP": "+0300,1"},
+            ]
+        return []
 
     monkeypatch.setattr(adapter, "fetch_year", fake_fetch_year)
 
-    result = await adapter.get_daily_actual(date(2026, 5, 24))
+    result = await adapter.get_daily_actual(date(2026, 1, 1))
 
+    assert fetched_years == [2025, 2026]
     assert result.source == "NOAA_ISD"
-    assert result.tmax_c == 24.0
-    assert result.rounded_tmax_c == 24
+    assert result.tmax_c == 26.0
+    assert result.rounded_tmax_c == 26
 
 
 @pytest.mark.asyncio
@@ -480,6 +487,36 @@ async def test_rainviewer_latest_tile_url_uses_ltac_coordinates(monkeypatch) -> 
     tile_url = await adapter.latest_radar_tile_url()
 
     assert tile_url == "https://tiles.example/v2/radar/test/512/7/40.1281/32.9951/2/1_1.png"
+
+
+@pytest.mark.asyncio
+async def test_optional_weatherapi_health_checks_configured_key(monkeypatch) -> None:
+    adapter = WeatherAPIAdapter(Settings(WEATHERAPI_API_KEY="test-key", TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["params"]["key"] == "test-key"
+        return {"forecast": {"forecastday": []}}
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    health = await adapter.health()
+
+    assert health.state.value == "ok"
+
+
+@pytest.mark.asyncio
+async def test_optional_windy_health_checks_configured_key(monkeypatch) -> None:
+    adapter = WindyAdapter(Settings(WINDY_API_KEY="test-key", TELEGRAM_ADMIN_IDS=""))
+
+    async def fake_request_json(url: str, **kwargs):
+        assert kwargs["headers"] == {"X-WINDY-API-KEY": "test-key"}
+        return {"ts": []}
+
+    monkeypatch.setattr(adapter, "_request_json", fake_request_json)
+
+    health = await adapter.health()
+
+    assert health.state.value == "ok"
 
 
 @pytest.mark.asyncio
