@@ -14,8 +14,7 @@ class HerbieAdapter(HttpSource):
 
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
-        self.noaa_api = "https://api.weather.gov"
-        self.nomads_url = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
+        self.openmeteo_url = "https://api.open-meteo.com/v1/forecast"
 
     async def get_gfs_tmax(self, target_date: date) -> float | None:
         """Fetch GFS tmax for LTAC from NOAA API (JSON fallback)."""
@@ -23,176 +22,121 @@ class HerbieAdapter(HttpSource):
         return forecast.tmax_c
 
     async def get_model_forecast(self, target_date: date) -> ModelForecast:
-        """Fetch GFS model data via NOAA public API.
+        """Fetch GFS model data via Open-Meteo global API.
 
-        Uses the NOAA NWS public API for grid-based forecasts as a fallback
-        since direct GRIB file parsing requires the herbie-data package.
+        Uses Open-Meteo's GFS seamless model which provides global coverage
+        including LTAC/Ankara coordinates. This replaces the US-only NWS
+        gridpoint API that cannot resolve non-US locations.
         """
         lat = self.settings.ltac_latitude
         lon = self.settings.ltac_longitude
-
-        try:
-            points_payload = await self._request_json(
-                f"{self.noaa_api}/points/{lat},{lon}",
-            )
-        except SourceError as exc:
-            return ModelForecast(
-                model="gfs_noaa",
-                available=False,
-                target_date=target_date,
-                unavailable_reason=str(exc),
-            )
-
-        if not isinstance(points_payload, dict):
-            return ModelForecast(
-                model="gfs_noaa",
-                available=False,
-                target_date=target_date,
-                unavailable_reason="NOAA points payload is not an object",
-            )
-
-        forecast_url = None
-        properties = points_payload.get("properties") if isinstance(points_payload.get("properties"), dict) else {}
-        if isinstance(properties, dict):
-            forecast_url = properties.get("forecast")
-        if not forecast_url:
-            return ModelForecast(
-                model="gfs_noaa",
-                available=False,
-                target_date=target_date,
-                unavailable_reason="NOAA forecast URL not found in response",
-            )
-
-        try:
-            forecast_payload = await self._request_json(str(forecast_url))
-        except SourceError as exc:
-            return ModelForecast(
-                model="gfs_noaa",
-                available=False,
-                target_date=target_date,
-                unavailable_reason=str(exc),
-            )
-
-        if not isinstance(forecast_payload, dict):
-            return ModelForecast(
-                model="gfs_noaa",
-                available=False,
-                target_date=target_date,
-                unavailable_reason="NOAA forecast payload is not an object",
-            )
-
         tz = ZoneInfo(self.settings.report_timezone)
-        periods = (
-            forecast_payload.get("properties", {}).get("periods", [])
-            if isinstance(forecast_payload.get("properties"), dict)
-            else []
-        )
-        if not isinstance(periods, list):
-            periods = []
+
+        try:
+            payload = await self._request_json(
+                self.openmeteo_url,
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+                    "daily": "temperature_2m_max",
+                    "models": "gfs_seamless",
+                    "timezone": self.settings.report_timezone,
+                    "start_date": target_date.isoformat(),
+                    "end_date": target_date.isoformat(),
+                },
+            )
+        except SourceError as exc:
+            return ModelForecast(
+                model="gfs_herbie",
+                available=False,
+                target_date=target_date,
+                unavailable_reason=str(exc),
+            )
+
+        if not isinstance(payload, dict):
+            return ModelForecast(
+                model="gfs_herbie",
+                available=False,
+                target_date=target_date,
+                unavailable_reason="Open-Meteo GFS payload is not an object",
+            )
+
+        hourly = payload.get("hourly") if isinstance(payload.get("hourly"), dict) else {}
+        daily = payload.get("daily") if isinstance(payload.get("daily"), dict) else {}
+        times = hourly.get("time") or []
+        temps = hourly.get("temperature_2m") or []
+        humidities = hourly.get("relative_humidity_2m") or []
+        wind_speeds = hourly.get("wind_speed_10m") or []
+        wind_dirs = hourly.get("wind_direction_10m") or []
+        daily_max = daily.get("temperature_2m_max") or []
 
         points: list[ModelHourlyPoint] = []
-        for period in periods:
-            if not isinstance(period, dict):
-                continue
-            start_time_str = period.get("startTime")
-            if not start_time_str:
+        for idx, ts_str in enumerate(times):
+            if not ts_str:
                 continue
             try:
-                ts = datetime.fromisoformat(str(start_time_str).replace("Z", "+00:00")).astimezone(tz)
+                ts = datetime.fromisoformat(str(ts_str)).replace(tzinfo=tz)
             except ValueError:
                 continue
             if ts.date() != target_date:
                 continue
-            temp_f = _safe_float(period.get("temperature"))
-            temp_c = _f_to_c(temp_f) if temp_f is not None else None
-            wind_speed_str = period.get("windSpeed", "")
-            wind_speed_kt = _parse_wind_speed(wind_speed_str)
-            wind_dir_deg = _parse_wind_direction(period.get("windDirection", ""))
-            humidity = _safe_float(period.get("relativeHumidity", {}).get("value") if isinstance(period.get("relativeHumidity"), dict) else None)
-
+            wind_speed_ms = _get_list_value(wind_speeds, idx)
             point = ModelHourlyPoint(
                 time=ts,
-                temperature_2m_c=temp_c,
-                relative_humidity_pct=humidity,
-                wind_speed_10m_kt=wind_speed_kt,
-                wind_direction_10m_deg=wind_dir_deg,
-                shortwave_radiation_wm2=None,
+                temperature_2m_c=_get_list_value(temps, idx),
+                relative_humidity_pct=_get_list_value(humidities, idx),
+                wind_speed_10m_kt=_ms_to_kt(wind_speed_ms),
+                wind_direction_10m_deg=_get_list_value(wind_dirs, idx),
             )
             if point.temperature_2m_c is not None:
                 points.append(point)
 
-        if not points:
-            return ModelForecast(
-                model="gfs_noaa",
-                available=False,
-                target_date=target_date,
-                unavailable_reason="NOAA GFS: no data for target date",
-                raw_model_key_map={"temperature_2m": "properties.periods[].temperature"},
-            )
-        temperatures = [p.temperature_2m_c for p in points if p.temperature_2m_c is not None]
+        daily_tmax = _get_list_value(daily_max, 0) if daily_max else None
+        hourly_temps = [p.temperature_2m_c for p in points if p.temperature_2m_c is not None]
+        tmax = daily_tmax if daily_tmax is not None else (max(hourly_temps) if hourly_temps else None)
+
         return ModelForecast(
-            model="gfs_noaa",
-            available=True,
+            model="gfs_herbie",
+            available=tmax is not None,
             target_date=target_date,
             hourly=points,
-            tmax_c=max(temperatures) if temperatures else None,
+            tmax_c=tmax,
             raw_model_key_map={
-                "temperature_2m": "periods[].temperature",
-                "wind_speed_10m": "periods[].windSpeed",
-                "wind_direction_10m": "periods[].windDirection",
-                "relative_humidity_2m": "periods[].relativeHumidity.value",
+                "temperature_2m": "hourly.temperature_2m",
+                "wind_speed_10m": "hourly.wind_speed_10m",
+                "wind_direction_10m": "hourly.wind_direction_10m",
+                "relative_humidity_2m": "hourly.relative_humidity_2m",
             },
         )
 
     async def health(self) -> SourceHealth:
         started = datetime.now(timezone.utc)
         try:
-            await self.get_model_forecast(datetime.now(ZoneInfo(self.settings.report_timezone)).date())
+            forecast = await self.get_model_forecast(datetime.now(ZoneInfo(self.settings.report_timezone)).date())
             latency = (datetime.now(timezone.utc) - started).total_seconds() * 1000
-            return SourceHealth(source=self.source_name, state=SourceState.OK, latency_ms=latency)
+            if forecast.available:
+                return SourceHealth(source=self.source_name, state=SourceState.OK, latency_ms=latency)
+            return SourceHealth(
+                source=self.source_name,
+                state=SourceState.DEGRADED,
+                latency_ms=latency,
+                message=forecast.unavailable_reason or "GFS data not available",
+            )
         except Exception as exc:
             return SourceHealth(source=self.source_name, state=SourceState.DOWN, message=str(exc))
 
 
-def _safe_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _f_to_c(value: float | None) -> float | None:
-    if value is None:
-        return None
-    return (value - 32.0) * 5.0 / 9.0
-
-
-def _parse_wind_speed(text: str) -> float | None:
-    import re
-    if not text:
-        return None
-    match = re.search(r"(\d+)\s*mph", text.lower())
-    if match:
-        return float(match.group(1)) * 0.868976
-    match = re.search(r"(\d+)\s*kt", text.lower())
-    if match:
-        return float(match.group(1))
+def _get_list_value(lst: list[Any], idx: int) -> float | None:
+    if idx < len(lst) and lst[idx] is not None:
+        try:
+            return float(lst[idx])
+        except (TypeError, ValueError):
+            return None
     return None
 
 
-def _parse_wind_direction(text: str) -> float | None:
-    import re
-    if not text:
+def _ms_to_kt(value: float | None) -> float | None:
+    if value is None:
         return None
-    match = re.search(r"(\d+)\s*°", text)
-    if match:
-        return float(match.group(1))
-    dirs = {
-        "N": 0, "NNE": 22.5, "NE": 45, "ENE": 67.5,
-        "E": 90, "ESE": 112.5, "SE": 135, "SSE": 157.5,
-        "S": 180, "SSW": 202.5, "SW": 225, "WSW": 247.5,
-        "W": 270, "WNW": 292.5, "NW": 315, "NNW": 337.5,
-    }
-    return dirs.get(text.strip().upper()) if text else None
+    return value * 1.94384

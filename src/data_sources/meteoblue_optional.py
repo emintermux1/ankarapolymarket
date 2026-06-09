@@ -30,7 +30,7 @@ class MeteoblueAdapter(HttpSource):
             "format": "json",
         }
         return await self._request_json(
-            f"{self.base_url}/basic-day",
+            f"{self.base_url}/basic-1h",
             params=params,
         )
 
@@ -44,7 +44,7 @@ class MeteoblueAdapter(HttpSource):
             "format": "json",
         }
         return await self._request_json(
-            f"{self.base_url}/basic-day",
+            f"{self.base_url}/basic-1h",
             params=params,
         )
 
@@ -68,26 +68,29 @@ class MeteoblueAdapter(HttpSource):
             )
         tz = ZoneInfo(self.settings.report_timezone)
         points: list[ModelHourlyPoint] = []
-        data_day = payload.get("data_day") if isinstance(payload.get("data_day"), dict) else {}
-        times = data_day.get("time") or []
+        data_hourly = payload.get("data_1h") if isinstance(payload.get("data_1h"), dict) else {}
+        times = data_hourly.get("time") or []
 
-        temperature_max = data_day.get("temperature_max") or []
-        temperature_min = data_day.get("temperature_min") or []
-        precipitation = data_day.get("precipitation") or []
-        windspeed = data_day.get("windspeed_mean") or []
+        temperature = data_hourly.get("temperature") or []
+        precipitation = data_hourly.get("precipitation") or []
+        windspeed = data_hourly.get("windspeed") or []
 
+        temperatures = []
         for idx, ts_str in enumerate(times):
             if not ts_str or not str(ts_str).startswith(target_date.isoformat()):
                 continue
+            temp_val = _get_idx(temperature, idx)
+            if temp_val is not None:
+                temperatures.append(temp_val)
             try:
                 ts = datetime.fromisoformat(str(ts_str)).replace(tzinfo=tz)
             except ValueError:
                 continue
             point = ModelHourlyPoint(
                 time=ts,
-                temperature_2m_c=_get_idx(temperature_max, idx),
+                temperature_2m_c=temp_val,
                 precipitation_mm=_get_idx(precipitation, idx),
-                wind_speed_10m_kt=_get_idx(windspeed, idx),
+                wind_speed_10m_kt=_ms_to_kt(_get_idx(windspeed, idx)),
             )
             if point.temperature_2m_c is not None:
                 points.append(point)
@@ -137,3 +140,10 @@ def _get_idx(lst: list[Any], idx: int) -> float | None:
         except (TypeError, ValueError):
             return None
     return None
+
+
+def _ms_to_kt(value: float | None) -> float | None:
+    """Convert m/s to knots. Meteoblue returns wind speed in m/s by default."""
+    if value is None:
+        return None
+    return value * 1.94384
