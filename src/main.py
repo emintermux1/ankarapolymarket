@@ -29,6 +29,10 @@ def main() -> None:
             "forum",
             "sources",
             "result",
+            "mgm",
+            "aqi",
+            "env",
+            "baraj",
         ],
     )
     parser.add_argument("--date", dest="target_date", help="Target date as YYYY-MM-DD")
@@ -71,6 +75,18 @@ def main() -> None:
         return
     if args.command == "result":
         print(asyncio.run(service.render_result(target_date=target)))
+        return
+    if args.command == "mgm":
+        print(asyncio.run(service.render_mgm()))
+        return
+    if args.command == "aqi":
+        print(asyncio.run(service.render_aqi()))
+        return
+    if args.command == "env":
+        print(asyncio.run(service.render_environment_digest()))
+        return
+    if args.command == "baraj":
+        print(asyncio.run(service.render_baraj()))
         return
     if args.command == "web":
         import uvicorn

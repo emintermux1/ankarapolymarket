@@ -11,14 +11,17 @@ from src.config import Settings
 from src.data_sources.schemas import (
     ActualResult,
     AviationSourceSnapshot,
+    BarajSnapshot,
     ForecastAnalysis,
     ForumAnalysis,
     MarketSnapshot,
     METARNormalized,
     ModelBundle,
     NearbySensorSnapshot,
+    PowerOutage,
     SourceHealth,
     TAFNormalized,
+    TwitterPost,
 )
 from src.forecast.upper_air import calculate_upper_air_profile_adjustment
 
@@ -747,6 +750,183 @@ class TelegramReportRenderer:
             _bullet(f"Gökyüzü kapalılığı (Oktas): {_cloud_cover_alarm_label(clouds)}"),
             _bullet(f"METAR trend analizi: {_metar_trend_label(metar)}"),
         ]
+
+    # ---- Turkish infrastructure render methods ----
+
+    def mgm_observation(self, data: dict) -> str:
+        if not data:
+            return "MGM Ankara gözlem verisi yok."
+        lines = ["🇹🇷 MGM ANKARA GÖZLEM", ""]
+        temp = data.get("sicaklik") or data.get("sıcaklık") or data.get("temperature")
+        if temp is not None:
+            lines.append(_bullet(f"Sıcaklık: {_safe_float(temp):.1f}°C"))
+        humidity = data.get("nem") or data.get("humidity")
+        if humidity is not None:
+            lines.append(_bullet(f"Nem: %{_safe_float(humidity):.0f}"))
+        wind_speed = data.get("ruzgar_hiz") or data.get("rüzgar_hız") or data.get("wind_speed")
+        wind_dir = data.get("ruzgar_yon") or data.get("rüzgar_yön") or data.get("wind_direction")
+        if wind_speed is not None or wind_dir is not None:
+            lines.append(_bullet(f"Rüzgar: {_safe_float(wind_dir) or 'VRB'}° / {_safe_float(wind_speed) or 'veri yok'} kt"))
+        pressure = data.get("basinc") or data.get("basınç") or data.get("pressure")
+        if pressure is not None:
+            lines.append(_bullet(f"Basınç: {_safe_float(pressure):.0f} hPa"))
+        if len(lines) == 2:
+            lines.append(_bullet("Veri parse edilemedi, ham yanıt:"))
+            import json
+            lines.append(f"```{json.dumps(data, ensure_ascii=False, indent=2)[:500]}```")
+        return "\n".join(lines)
+
+    def aqi_report(self, data: dict) -> str:
+        if not data:
+            return "🌫️ Hava kalitesi verisi yok."
+        eu_aqi = data.get("european_aqi")
+        pm25 = data.get("pm2_5")
+        pm10 = data.get("pm10")
+        no2 = data.get("no2")
+        o3 = data.get("o3")
+        aqi_emoji = _aqi_emoji(eu_aqi)
+        aqi_label = _aqi_label(eu_aqi)
+        lines = ["🌫️ ANKARA HAVA KALİTESİ (AQI)", ""]
+        if eu_aqi is not None:
+            lines.append(_bullet(f"Avrupa AQI: {aqi_emoji} {eu_aqi:.0f} ({aqi_label})"))
+        if pm25 is not None:
+            lines.append(_bullet(f"PM2.5: {pm25:.1f} µg/m³"))
+        if pm10 is not None:
+            lines.append(_bullet(f"PM10: {pm10:.1f} µg/m³"))
+        if no2 is not None:
+            lines.append(_bullet(f"NO₂: {no2:.1f} µg/m³"))
+        if o3 is not None:
+            lines.append(_bullet(f"O₃: {o3:.1f} µg/m³"))
+        if eu_aqi is None and pm25 is None:
+            lines.append(_bullet("Veri alınamadı."))
+        return "\n".join(lines)
+
+    def uv_report(self, data: dict) -> str:
+        if not data:
+            return "☀️ UV indeks verisi yok."
+        uv_max = data.get("uv_index_max")
+        uv_clear = data.get("uv_clear_sky_max")
+        uv_date = data.get("date", "bugün")
+        uv_emoji = _uv_emoji(uv_max)
+        uv_label = _uv_label(uv_max)
+        lines = ["☀️ UV İNDEKSİ - Ankara", ""]
+        if uv_max is not None:
+            lines.append(_bullet(f"Bugünkü maks UV: {uv_emoji} {uv_max:.1f} ({uv_label})"))
+        if uv_clear is not None:
+            lines.append(_bullet(f"Açık hava UV: {uv_clear:.1f}"))
+        if uv_max is None:
+            lines.append(_bullet("Veri alınamadı."))
+        else:
+            lines.append("")
+            protection = _uv_protection(uv_max)
+            lines.append(f"🛡️ {protection}")
+        return "\n".join(lines)
+
+    def baraj_report(self, snapshot: Any) -> str:
+        try:
+            from src.data_sources.schemas import BarajSnapshot
+            if not isinstance(snapshot, BarajSnapshot):
+                return "💧 Baraj doluluk verisi yok."
+            lines = ["💧 ANKARA BARAJ DOLULUK", ""]
+            if snapshot.total_fill_pct is not None:
+                bar = _progress_bar(snapshot.total_fill_pct)
+                lines.append(_bullet(f"Toplam doluluk: {bar} %{snapshot.total_fill_pct:.1f}"))
+            if snapshot.daily_change_pct is not None:
+                sign = "+" if snapshot.daily_change_pct > 0 else ""
+                lines.append(_bullet(f"Günlük değişim: {sign}{snapshot.daily_change_pct:.1f}%"))
+            if snapshot.dams:
+                lines.append("")
+                for dam in snapshot.dams:
+                    name = dam.get("name", "?")
+                    fill = dam.get("fill_pct")
+                    if fill is not None:
+                        bar = _progress_bar(fill)
+                        lines.append(f"  {name}: {bar} %{fill:.1f}")
+            if snapshot.last_updated:
+                lines.append("")
+                lines.append(f"Son güncelleme: {snapshot.last_updated:%Y-%m-%d}")
+            if not snapshot.dams and snapshot.total_fill_pct is None:
+                lines.append(_bullet("Baraj verisi parse edilemedi."))
+            return "\n".join(lines)
+        except Exception:
+            return "💧 Baraj doluluk verisi işlenemedi."
+
+    def outage_report(self, outages: list | None) -> str:
+        if not outages:
+            return "⚡ Planlı elektrik kesintisi duyurusu yok."
+        lines = ["⚡ TEDAŞ ANKARA PLANLI KESİNTİLER", ""]
+        for outage in outages:
+            try:
+                from src.data_sources.schemas import PowerOutage
+                if isinstance(outage, PowerOutage):
+                    district = outage.district
+                    reason = outage.reason or "Bakım/onarım"
+                    start = f"{outage.start_time:%d.%m.%Y %H:%M}" if outage.start_time else "?"
+                    end = f"{outage.end_time:%H:%M}" if outage.end_time else "?"
+                    lines.append(f"📍 {district}: {start} - {end}")
+                    lines.append(f"   Sebep: {reason}")
+                    if outage.affected_areas:
+                        lines.append(f"   Etkilenen: {', '.join(outage.affected_areas[:5])}")
+                else:
+                    district = getattr(outage, "district", "Ankara")
+                    reason = getattr(outage, "reason", None) or "Bakım/onarım"
+                    lines.append(f"📍 {district}")
+                    lines.append(f"   Sebep: {reason}")
+            except Exception:
+                lines.append(f"📍 Kesinti bilgisi parse edilemedi")
+        return "\n".join(lines)
+
+    def twitter_report(self, posts: list | None) -> str:
+        if not posts:
+            return "🐦 MGM Ankara tweet verisi yok."
+        lines = ["🐦 SON MGM ANKARA TWEETLERİ", ""]
+        for post in posts[:5]:
+            try:
+                from src.data_sources.schemas import TwitterPost
+                if isinstance(post, TwitterPost):
+                    text = post.text[:200]
+                    ts = post.published_at
+                    lines.append(f"📌 {ts:%d.%m %H:%M}: {text}")
+                    if post.url:
+                        lines.append(f"   {post.url}")
+                else:
+                    text = getattr(post, "text", "")[:200]
+                    lines.append(f"📌 {text}")
+            except Exception:
+                continue
+        return "\n".join(lines)
+
+    def environment_digest(self, mgm_text: str, aqi_text: str, uv_text: str, baraj_text: str) -> str:
+        lines = ["🌍 ANKARA ÇEVRE DURUMU", ""]
+        # Extract key info from each section
+        lines.append("━━━ MGM Gözlem ━━━")
+        if mgm_text:
+            for line in mgm_text.split("\n"):
+                if line.strip():
+                    lines.append(line)
+        lines.append("")
+        lines.append("━━━ Hava Kalitesi ━━━")
+        if aqi_text:
+            for line in aqi_text.split("\n"):
+                if line.strip():
+                    lines.append(line)
+        lines.append("")
+        lines.append("━━━ UV İndeks ━━━")
+        if uv_text:
+            for line in uv_text.split("\n"):
+                if line.strip():
+                    lines.append(line)
+        lines.append("")
+        lines.append("━━━ Baraj Doluluk ━━━")
+        if baraj_text:
+            for line in baraj_text.split("\n"):
+                if line.strip():
+                    lines.append(line)
+        return "\n".join(lines)
+
+    def radar_caption(self) -> str:
+        local = datetime.now(self.tz)
+        return f"Ankara radar görüntüsü - {local:%Y-%m-%d %H:%M} ({self.settings.report_timezone}) | Canlı radar: {self.settings.radar_motion_url}"
 
     def _data_quality_lines(
         self,
@@ -1799,3 +1979,91 @@ def _adj(adjustment: object | None) -> str:
     if adjustment is None:
         return "veri yok"
     return f"{adjustment.summary} ({adjustment.value_c:+.1f}°C)"
+
+
+# ---- Turkish infrastructure helper functions ----
+
+def _progress_bar(pct: float, length: int = 10) -> str:
+    filled = int(round(pct / 100 * length))
+    empty = length - filled
+    bar = "█" * filled + "░" * empty
+    # Color indicator
+    if pct >= 80:
+        indicator = "🟢"
+    elif pct >= 50:
+        indicator = "🟡"
+    elif pct >= 25:
+        indicator = "🟠"
+    else:
+        indicator = "🔴"
+    return f"{indicator} [{bar}]"
+
+
+def _aqi_emoji(aqi_value: float | None) -> str:
+    if aqi_value is None:
+        return "❓"
+    if aqi_value <= 20:
+        return "🟢"
+    if aqi_value <= 40:
+        return "🟡"
+    if aqi_value <= 60:
+        return "🟠"
+    if aqi_value <= 80:
+        return "🔴"
+    return "🟣"
+
+
+def _aqi_label(aqi_value: float | None) -> str:
+    if aqi_value is None:
+        return "bilinmiyor"
+    if aqi_value <= 20:
+        return "İyi"
+    if aqi_value <= 40:
+        return "Orta"
+    if aqi_value <= 60:
+        return "Hassas gruplar için sağlıksız"
+    if aqi_value <= 80:
+        return "Sağlıksız"
+    if aqi_value <= 100:
+        return "Çok sağlıksız"
+    return "Tehlikeli"
+
+
+def _uv_emoji(uv_value: float | None) -> str:
+    if uv_value is None:
+        return "❓"
+    if uv_value <= 2:
+        return "🟢"
+    if uv_value <= 5:
+        return "🟡"
+    if uv_value <= 7:
+        return "🟠"
+    if uv_value <= 10:
+        return "🔴"
+    return "🟣"
+
+
+def _uv_label(uv_value: float | None) -> str:
+    if uv_value is None:
+        return "bilinmiyor"
+    if uv_value <= 2:
+        return "Düşük"
+    if uv_value <= 5:
+        return "Orta"
+    if uv_value <= 7:
+        return "Yüksek"
+    if uv_value <= 10:
+        return "Çok yüksek"
+    return "Ekstrem"
+
+
+def _uv_protection(uv_value: float) -> str:
+    if uv_value <= 2:
+        return "Koruma gerekmez."
+    if uv_value <= 5:
+        return "Güneş gözlüğü + şapka önerilir."
+    if uv_value <= 7:
+        return "SPF 30+ + gölge arayın."
+    if uv_value <= 10:
+        return "SPF 50+; 10-16 arası güneşten kaçının."
+    return "Dışarı çıkmayın + tam koruma zorunlu."

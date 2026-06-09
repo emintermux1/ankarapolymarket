@@ -9,7 +9,7 @@ from telegram import LinkPreviewOptions
 from telegram.ext import Application
 
 from src.config import Settings
-from src.data_sources.schemas import ForecastAnalysis, round_market_temperature_c
+from src.data_sources.schemas import BarajSnapshot, ForecastAnalysis, round_market_temperature_c
 from src.service import ForecastService
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,81 @@ def build_scheduler(application: Application, service: ForecastService, settings
             max_instances=1,
             coalesce=True,
             next_run_time=datetime.now(ZoneInfo(settings.report_timezone)) + timedelta(minutes=1),
+        )
+    # Turkish scraper bundle
+    scheduler.add_job(
+        _turkish_scraper_bundle,
+        trigger="interval",
+        minutes=settings.turkish_scraper_interval_minutes,
+        args=[application, service],
+        id="turkish_scraper_bundle",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(ZoneInfo(settings.report_timezone)) + timedelta(minutes=5),
+    )
+    # AQI alerts
+    if settings.enable_aqi_alerts:
+        scheduler.add_job(
+            _send_aqi_alert,
+            trigger="interval",
+            hours=3,
+            args=[application, service],
+            id="aqi_alert",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(ZoneInfo(settings.report_timezone)) + timedelta(minutes=2),
+        )
+    # Baraj doluluk alerts (daily at 09:00)
+    if settings.enable_baraj_alerts:
+        scheduler.add_job(
+            _send_baraj_alert,
+            trigger="cron",
+            hour=9,
+            minute=0,
+            args=[application, service],
+            id="baraj_alert",
+            replace_existing=True,
+            misfire_grace_time=900,
+        )
+    # Twitter post forwarding
+    if settings.enable_twitter_posts:
+        scheduler.add_job(
+            _send_twitter_posts,
+            trigger="interval",
+            minutes=30,
+            args=[application, service],
+            id="twitter_posts",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(ZoneInfo(settings.report_timezone)) + timedelta(minutes=3),
+        )
+    # Power outage alerts
+    if settings.enable_power_outage_alerts:
+        scheduler.add_job(
+            _send_power_outage_alerts,
+            trigger="interval",
+            hours=2,
+            args=[application, service],
+            id="power_outage_alerts",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(ZoneInfo(settings.report_timezone)) + timedelta(minutes=4),
+        )
+    # Environment digest (daily at 08:00)
+    if settings.enable_baraj_alerts or settings.enable_aqi_alerts:
+        scheduler.add_job(
+            _send_environment_digest,
+            trigger="cron",
+            hour=8,
+            minute=0,
+            args=[application, service],
+            id="environment_digest",
+            replace_existing=True,
+            misfire_grace_time=900,
         )
     return scheduler
 
@@ -377,3 +452,95 @@ def _safe_float(value: object) -> float | None:
 def _time_reached(now: datetime, time_text: str) -> bool:
     hour, minute = [int(part) for part in time_text.split(":", 1)]
     return (now.hour, now.minute) >= (hour, minute)
+
+
+# ---- Turkish infrastructure scheduled jobs ----
+
+
+async def _turkish_scraper_bundle(application: Application, service: ForecastService) -> None:
+    """Periodic job that fetches all Turkish data sources and logs status."""
+    logger.info("Turkish scraper bundle running")
+    try:
+        mgm = await service.mgm.get_ankara_observation()
+        logger.info("MGM observation fetched: %s keys", len(mgm) if mgm else 0)
+    except Exception as exc:
+        logger.warning("MGM scraper failed: %s", exc)
+
+    try:
+        aqi = await service.aqi.get_aqi()
+        logger.info("AQI fetched: %s", aqi.get("european_aqi") if aqi else None)
+    except Exception as exc:
+        logger.warning("AQI scraper failed: %s", exc)
+
+    try:
+        uv = await service.uv_index.get_uv()
+        logger.info("UV fetched: %s", uv.get("uv_index_max") if uv else None)
+    except Exception as exc:
+        logger.warning("UV scraper failed: %s", exc)
+
+
+async def _send_aqi_alert(application: Application, service: ForecastService) -> None:
+    chat_id = service.settings.telegram_channel_id
+    if not chat_id:
+        return
+    try:
+        aqi_data = await service._safe_aqi_data()
+        if not aqi_data:
+            return
+        eu_aqi = aqi_data.get("european_aqi")
+        if eu_aqi is not None and eu_aqi > 60:
+            text = service.renderer.aqi_report(aqi_data)
+            await _send_long(application, chat_id, text)
+    except Exception as exc:
+        logger.warning("AQI alert failed: %s", exc)
+
+
+async def _send_baraj_alert(application: Application, service: ForecastService) -> None:
+    chat_id = service.settings.telegram_channel_id
+    if not chat_id:
+        return
+    try:
+        snapshot = await service._safe_baraj_snapshot()
+        if snapshot is None:
+            return
+        text = service.renderer.baraj_report(snapshot)
+        await _send_long(application, chat_id, text)
+    except Exception as exc:
+        logger.warning("Baraj alert failed: %s", exc)
+
+
+async def _send_twitter_posts(application: Application, service: ForecastService) -> None:
+    chat_id = service.settings.telegram_channel_id
+    if not chat_id:
+        return
+    try:
+        posts = await service.twitter.get_twitter_snapshots(limit=3)
+        if posts:
+            text = service.renderer.twitter_report(posts)
+            await _send_long(application, chat_id, text)
+    except Exception as exc:
+        logger.warning("Twitter posts failed: %s", exc)
+
+
+async def _send_power_outage_alerts(application: Application, service: ForecastService) -> None:
+    chat_id = service.settings.telegram_channel_id
+    if not chat_id:
+        return
+    try:
+        outages = await service.tedas.get_outage_snapshots()
+        if outages:
+            text = service.renderer.outage_report(outages)
+            await _send_long(application, chat_id, text)
+    except Exception as exc:
+        logger.warning("Power outage alert failed: %s", exc)
+
+
+async def _send_environment_digest(application: Application, service: ForecastService) -> None:
+    chat_id = service.settings.telegram_channel_id
+    if not chat_id:
+        return
+    try:
+        text = await service.render_environment_digest()
+        await _send_long(application, chat_id, text)
+    except Exception as exc:
+        logger.warning("Environment digest failed: %s", exc)

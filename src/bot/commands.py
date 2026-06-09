@@ -19,8 +19,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await _reply(
         update,
-        "LTAC Ankara Esenboğa bot aktif. Komutlar: "
-        "/hourly /today /aviation /ltac /now /metar /metars /taf /models /signals /market /edge /backtest /sources /chart /result",
+        "🇹🇷 LTAC Ankara Esenboğa bot aktif.\n\n"
+        "🌡️ Tahmin: /hourly /today /aviation /ltac /now /metar /metars /taf /models /signals /market /edge\n"
+        "🌍 Çevre: /mgm /aqi /uv /baraj /cevre /env /radar\n"
+        "⚡ Altyapı: /outage /kesinti /twitter\n"
+        "📊 Diğer: /backtest /sources /chart /result",
     )
 
 
@@ -142,6 +145,75 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat:
         with open(path, "rb") as image:
             await context.bot.send_photo(chat_id=update.effective_chat.id, photo=image, caption=caption)
+
+
+async def mgm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_mgm())
+
+
+async def aqi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_aqi())
+
+
+async def uv_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_uv())
+
+
+async def baraj(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_baraj())
+
+
+async def cevre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_environment_digest())
+
+
+async def env_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await cevre(update, context)
+
+
+async def radar_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    url, caption = await service.render_radar()
+    if update.effective_chat:
+        if url:
+            await _reply(update, f"{caption}\n\n{url}")
+        else:
+            await _reply(update, caption)
+
+
+async def outage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_outages())
+
+
+async def kesinti(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await outage(update, context)
+
+
+async def twitter_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    await _reply_long(update, await service.render_twitter())
 
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

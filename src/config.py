@@ -330,6 +330,24 @@ class Settings(BaseSettings):
     polymarket_signer_address: str | None = Field(default=None, alias="POLYMARKET_SIGNER_ADDRESS")
     polymarket_trading_enabled: bool = Field(default=False, alias="POLYMARKET_TRADING_ENABLED")
 
+    mgm_station_id: str = Field(default="17130", alias="MGM_STATION_ID")
+    mgm_observation_url: str = Field(default="https://servis.mgm.gov.tr/web/sondurumlar", alias="MGM_OBSERVATION_URL")
+    aqi_latitude: float = Field(default=39.9334, alias="AQI_LATITUDE")
+    aqi_longitude: float = Field(default=32.8597, alias="AQI_LONGITUDE")
+    twitter_ankara_accounts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["mgm_ankara"],
+        alias="TWITTER_ANKARA_ACCOUNTS",
+    )
+    aski_baraj_url: str = Field(
+        default="https://www.aski.gov.tr/tr/baraj-doluluk-oranlari",
+        alias="ASKI_BARAJ_URL",
+    )
+    enable_baraj_alerts: bool = Field(default=False, alias="ENABLE_BARAJ_ALERTS")
+    enable_aqi_alerts: bool = Field(default=False, alias="ENABLE_AQI_ALERTS")
+    enable_twitter_posts: bool = Field(default=False, alias="ENABLE_TWITTER_POSTS")
+    enable_power_outage_alerts: bool = Field(default=False, alias="ENABLE_POWER_OUTAGE_ALERTS")
+    turkish_scraper_interval_minutes: int = Field(default=60, alias="TURKISH_SCRAPER_INTERVAL_MINUTES")
+
     data_dir: Path = Path("data")
     chart_dir: Path = Path("data/charts")
 
@@ -342,6 +360,7 @@ class Settings(BaseSettings):
         "polymarket_target_location_terms",
         "openmeteo_models",
         "openmeteo_ensemble_models",
+        "twitter_ankara_accounts",
         mode="before",
     )
     @classmethod
