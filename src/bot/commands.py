@@ -209,6 +209,14 @@ async def kesinti(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await outage(update, context)
 
 
+async def avwx_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    service = service_from_context(context)
+    if not _is_allowed_chat(update, service):
+        return
+    station = context.args[0].upper() if context.args else "LTAC"
+    await _reply_long(update, await service.render_aviation_enrichment(station=station))
+
+
 async def twitter_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = service_from_context(context)
     if not _is_allowed_chat(update, service):
