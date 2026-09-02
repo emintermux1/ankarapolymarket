@@ -15,11 +15,17 @@ from src.data_sources.copernicus import CopernicusAdapter
 from src.data_sources.havaforum import HavaForumScraper
 from src.data_sources.herbie_optional import HerbieAdapter
 from src.data_sources.iem_asos import IEMASOSAdapter
+from src.data_sources.met_no import MetNoAdapter
 from src.data_sources.mgm import MGMAdapter
+from src.data_sources.noaa_isd import NOAAISDAdapter
 from src.data_sources.openmeteo import OpenMeteoAdapter
+from src.data_sources.openmeteo_ecmwf import OpenMeteoECMWFAdapter
+from src.data_sources.openmeteo_previous_runs import OpenMeteoPreviousRunsAdapter
 from src.data_sources.openweather import OpenWeatherAdapter
 from src.data_sources.polymarket import PolymarketAviationReader
 from src.data_sources.radar_satellite import RadarSatelliteAdapter
+from src.data_sources.rainviewer import RainViewerAdapter
+from src.data_sources.reference_sources import DWDIconAdapter, EUMETSATAdapter, NASAPowerAdapter, OgimetAdapter
 from src.data_sources.schemas import (
     ActualResult,
     AviationSourceSnapshot,
@@ -42,8 +48,8 @@ from src.data_sources.twitter_x import TwitterXAdapter
 from src.data_sources.uv_index import UVIndexAdapter
 from src.data_sources.visualcrossing import VisualCrossingAdapter
 from src.data_sources.weatherbit import WeatherbitAdapter
-from src.data_sources.weatherapi_optional import unavailable_health as weatherapi_unavailable_health
-from src.data_sources.windy_optional import unavailable_health as windy_unavailable_health
+from src.data_sources.weatherapi_optional import WeatherAPIAdapter
+from src.data_sources.windy_optional import WindyAdapter
 from src.data_sources.wunderground import WundergroundScraper
 from src.data_sources.avwx import AVWXAdapter
 from src.data_sources.noaa_aviation import NOAAAviationAdapter
@@ -77,12 +83,16 @@ class ForecastService:
         self.aviation = AviationWeatherAdapter(settings)
         self.checkwx = CheckWXAdapter(settings)
         self.openmeteo = OpenMeteoAdapter(settings)
+        self.openmeteo_ecmwf = OpenMeteoECMWFAdapter(settings)
+        self.openmeteo_previous_runs = OpenMeteoPreviousRunsAdapter(settings)
+        self.met_no = MetNoAdapter(settings)
         self.visualcrossing = VisualCrossingAdapter(settings)
         self.tomorrow = TomorrowIOAdapter(settings)
         self.openweather = OpenWeatherAdapter(settings)
         self.weatherbit = WeatherbitAdapter(settings)
         self.polymarket = PolymarketAviationReader(settings)
         self.iem = IEMASOSAdapter(settings)
+        self.noaa_isd = NOAAISDAdapter(settings)
         self.wunderground = WundergroundScraper(settings)
         self.havaforum = HavaForumScraper(settings)
         self.mgm = MGMAdapter(settings)
@@ -97,6 +107,11 @@ class ForecastService:
         self.xweather = XWeatherAdapter(settings)
         self.uv_index = UVIndexAdapter(settings)
         self.radar = RadarSatelliteAdapter(settings)
+        self.rainviewer = RainViewerAdapter(settings)
+        self.eumetsat = EUMETSATAdapter(settings)
+        self.dwd_icon = DWDIconAdapter(settings)
+        self.nasa_power = NASAPowerAdapter(settings)
+        self.ogimet = OgimetAdapter(settings)
         self.aski = ASKIBarajAdapter(settings)
         self.tedas = TEDASAdapter(settings)
         self.twitter = TwitterXAdapter(settings)
@@ -328,6 +343,11 @@ class ForecastService:
 
     async def render_radar(self) -> tuple[str, str]:
         try:
+            tile_url = await self.rainviewer.latest_radar_tile_url()
+            return tile_url, f"RainViewer Ankara radar tile - {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC"
+        except Exception:
+            pass
+        try:
             result = await self.radar.get_radar_image()
             if result:
                 return result
@@ -374,6 +394,11 @@ class ForecastService:
                 result = await self.wunderground.get_daily_result(target)
         else:
             result = await self.wunderground.get_daily_result(target)
+        if result.tmax_c is None:
+            try:
+                result = await self.noaa_isd.get_daily_actual(target)
+            except Exception:
+                pass
         self.repository.save_actual_result(result)
         return result
 
@@ -403,12 +428,16 @@ class ForecastService:
             self.aviation.health(),
             self.checkwx.health(),
             self.openmeteo.health(),
+            self.openmeteo_ecmwf.health(),
+            self.openmeteo_previous_runs.health(),
+            self.met_no.health(),
             self.visualcrossing.health(),
             self.tomorrow.health(),
             self.openweather.health(),
             self.weatherbit.health(),
             self.polymarket.health(),
             self.iem.health(),
+            self.noaa_isd.health(),
             self.wunderground.health(),
             self.havaforum.health(),
             self.aviation_watch.health(),
@@ -419,6 +448,11 @@ class ForecastService:
             self.twitter.health(),
             self.uv_index.health(),
             self.radar.health(),
+            self.rainviewer.health(),
+            self.eumetsat.health(),
+            self.dwd_icon.health(),
+            self.nasa_power.health(),
+            self.ogimet.health(),
             self.copernicus.health(),
             self.stormglass.health(),
             self.xweather.health(),
@@ -430,8 +464,8 @@ class ForecastService:
         optional_health = [
             await self.mgm.health(),
             await self.herbie.health(),
-            windy_unavailable_health(),
-            weatherapi_unavailable_health(),
+            await WindyAdapter(self.settings).health(),
+            await WeatherAPIAdapter(self.settings).health(),
         ]
         for item in [*health, *optional_health]:
             self.repository.save_source_health(item)
@@ -456,8 +490,10 @@ class ForecastService:
                 return None
 
     async def _safe_models(self, target_date: date) -> ModelBundle | None:
-        bundle, visual, tomorrow, openweather, weatherbit, stormglass, xweather = await asyncio.gather(
+        bundle, ecmwf_hres, met_no, visual, tomorrow, openweather, weatherbit, stormglass, xweather = await asyncio.gather(
             self._safe_openmeteo_models(target_date),
+            self._safe_ecmwf_hres_model(target_date),
+            self._safe_met_no_model(target_date),
             self._safe_visualcrossing_model(target_date),
             self._safe_tomorrow_model(target_date),
             self._safe_openweather_model(target_date),
@@ -465,7 +501,11 @@ class ForecastService:
             self._safe_stormglass_model(target_date),
             self._safe_xweather_model(target_date),
         )
-        extras = [forecast for forecast in (visual, tomorrow, openweather, weatherbit, stormglass, xweather) if forecast is not None]
+        extras = [
+            forecast
+            for forecast in (ecmwf_hres, met_no, visual, tomorrow, openweather, weatherbit, stormglass, xweather)
+            if forecast is not None
+        ]
         if bundle is None and extras:
             bundle = ModelBundle(fetch_timestamp=datetime.now(timezone.utc), target_date=target_date, source="Mixed")
         if bundle is not None:
@@ -475,6 +515,18 @@ class ForecastService:
     async def _safe_openmeteo_models(self, target_date: date) -> ModelBundle | None:
         try:
             return await self.openmeteo.get_bundle_with_ensemble(target_date)
+        except Exception:
+            return None
+
+    async def _safe_ecmwf_hres_model(self, target_date: date) -> ModelForecast | None:
+        try:
+            return await self.openmeteo_ecmwf.get_model_forecast(target_date)
+        except Exception:
+            return None
+
+    async def _safe_met_no_model(self, target_date: date) -> ModelForecast | None:
+        try:
+            return await self.met_no.get_model_forecast(target_date)
         except Exception:
             return None
 
@@ -584,7 +636,7 @@ class ForecastService:
 
     async def render_aviation_enrichment(self, station: str = "LTAC") -> str:
         """Combined aviation enrichment: METAR alt sources + PIREPs + flights."""
-        return await self.renderer.aviation_enrichment(
+        return self.renderer.aviation_enrichment(
             await self._fetch_aviation_metars(station),
             await self.render_pireps(station),
             await self.render_flights(station),
